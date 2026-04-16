@@ -285,9 +285,9 @@ select:focus,input:focus{border-color:var(--green)}
       </div>
     </div>
     <div class="ptabs" id="ptabs">
-      <div class="ptab" data-id="transito"   onclick="selPredio('transito')">El Tránsito</div>
-      <div class="ptab" data-id="constancia" onclick="selPredio('constancia')">La Constancia</div>
-      <div class="ptab" data-id="paradero"   onclick="selPredio('paradero')">Paradero 12</div>
+      <div class="ptab" data-id="z1" onclick="selPredio('z1')">Zona 1 La Viña</div>
+      <div class="ptab" data-id="z2" onclick="selPredio('z2')">Zona 2</div>
+      <div class="ptab" data-id="z3" onclick="selPredio('z3')">Zona 3</div>
     </div>
     <div class="nav">
       <button class="nb active" onclick="showScr('registro',this)">Registrar</button>
@@ -440,11 +440,11 @@ select:focus,input:focus{border-color:var(--green)}
 // STATIC DATA
 // ══════════════════════════════════════════════
 const PREDIOS={
-  transito:  {nombre:'El Tránsito',   jefe:'Marcelo Covarrubias', subjefes:['Marcelo Covarrubias']},
-  constancia:{nombre:'La Constancia', jefe:'Marcelo Covarrubias', subjefes:['Sara','José','José Invierno','Roxana']},
-  paradero:  {nombre:'Paradero 12',   jefe:'Jorge Guajardo',      subjefes:['Jorge Guajardo']}
+  z1:{nombre:'Zona 1 La Viña', jefe:'José Yañez',        subjefes:['Mirta Peña']},
+  z2:{nombre:'Zona 2',         jefe:'Guillermo Olivares', subjefes:['Santiago Orrego']},
+  z3:{nombre:'Zona 3',         jefe:'René Albornoz',      subjefes:['Claudio Cuevas']}
 };
-const PRED_ORDER=['transito','constancia','paradero'];
+const PRED_ORDER=['z1','z2','z3'];
 const DIAS=['Lunes','Martes','Miérc.','Jueves','Viernes'];
 const TNAMES={otono:'Otoño',invierno:'Invierno',primor:'Primor',trastomate:'Trastomate',verano:'Verano'};
 const TICONS={otono:'🍂',invierno:'❄️',primor:'🌱',trastomate:'🔄',verano:'☀️'};
@@ -491,23 +491,23 @@ const db   = firebase.firestore();
 // /programacion/{predioId}/subjefes/{subjefe}/semanas/{mondayIso}
 // /users/{uid}  { email, nombre, role:'admin'|'subjefe', predioId, subjefe }
 
-const colWorkers  = pid => db.collection('workers').doc(pid).collection('list');
-const colRegistros= pid => db.collection('registros').doc(pid).collection('entries');
-const colCiclos   = (pid,sub) => db.collection('ciclos').doc(pid).collection('subjefes').doc(sub).collection('cycles');
-const colProg     = (pid,sub) => db.collection('programacion').doc(pid).collection('subjefes').doc(sub).collection('semanas');
-const colUsers    = () => db.collection('users');
+const colWorkers  = pid => db.collection('arr_workers').doc(pid).collection('list');
+const colRegistros= pid => db.collection('arr_registros').doc(pid).collection('entries');
+const colCiclos   = (pid,sub) => db.collection('arr_ciclos').doc(pid).collection('subjefes').doc(sub).collection('cycles');
+const colProg     = (pid,sub) => db.collection('arr_programacion').doc(pid).collection('subjefes').doc(sub).collection('semanas');
+const colUsers    = () => db.collection('arr_users');
 
 // ══════════════════════════════════════════════
 // APP STATE
 // ══════════════════════════════════════════════
 const today    = new Date();
 const todayIso = today.toISOString().slice(0,10);
-let activePred = 'transito';
+let activePred = 'z1';
 let selDate    = todayIso;
 let progWeekOffset = 0;
 
 // In-memory caches (refreshed on predio change / live listeners)
-let wMap       = {transito:[],constancia:[],paradero:[]};
+let wMap       = {z1:[],z2:[],z3:[]};
 let rCache     = [];   // registros of active predio
 let ciclosCache= {};   // {subjefe: [cycles]}
 let progCache  = {};   // {mondayIso: progDoc}
@@ -613,7 +613,7 @@ function bootApp(){
   applyRoleUI();
 
   // Load data for default predio
-  const startPredio = isAdmin()?'transito':(currentProfile.predioId||'transito');
+  const startPredio = isAdmin()?'z1':(currentProfile.predioId||'z1');
   selPredio(startPredio);
 }
 
