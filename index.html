@@ -747,7 +747,8 @@ function populateSels(){
 function filtW(){
   const sub=document.getElementById('selSub').value||(isAdmin()?'':userSubjefe());
   const sel=document.getElementById('selW');const cur=sel.value;
-  const list=sub?pWs().filter(w=>w.subjefe===sub):pWs();
+  // Arrayanes uses pool workers - always show all, ignore subjefe filter
+  const list=pWs();
   sel.innerHTML=`<option value="">— Seleccionar —</option>`+list.map(w=>`<option value="${w.id}">${w.nombre}</option>`).join('');
   sel.value=cur;
   // populate reemplazo with ALL workers from ALL predios + Otro
