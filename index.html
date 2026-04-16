@@ -31,9 +31,9 @@ const FIREBASE_CONFIG = {
   --green:#2D6A4F;--green-l:#40916C;--green-xl:#74C69D;--lime:#B7E4C7;
   --cream:#F8F5EF;--sand:#E9E3D7;--dark:#1A2E1F;--text:#2A2A2A;--muted:#7A7A7A;
   --red:#D62828;--white:#fff;--shadow:0 2px 12px rgba(0,0,0,.10);--r:14px;
-  --c-t:#1D4ED8;--bg-t:#EFF6FF;
-  --c-c:#6B21A8;--bg-c:#FDF4FF;
-  --c-p:#92400E;--bg-p:#FEF3C7;
+  --c-z1:#1D4ED8;--bg-z1:#EFF6FF;
+  --c-z2:#166534;--bg-z2:#DCFCE7;
+  --c-z3:#92400E;--bg-z3:#FEF3C7;
   --c-otono:#B45309;    --bg-otono:#FEF3C7;
   --c-invierno:#1D4ED8; --bg-invierno:#EFF6FF;
   --c-primor:#166534;   --bg-primor:#DCFCE7;
@@ -70,9 +70,9 @@ body{font-family:'Inter',sans-serif;background:var(--cream);color:var(--text);ma
 .ptabs{display:flex;gap:5px;padding:0 0 9px;overflow-x:auto;scrollbar-width:none}
 .ptabs::-webkit-scrollbar{display:none}
 .ptab{flex-shrink:0;border:1.5px solid rgba(255,255,255,.14);border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;color:rgba(255,255,255,.4);cursor:pointer;transition:all .2s;white-space:nowrap;background:transparent}
-.ptab-t{background:var(--bg-t);color:var(--c-t);border-color:var(--c-t)}
-.ptab-c{background:var(--bg-c);color:var(--c-c);border-color:var(--c-c)}
-.ptab-p{background:var(--bg-p);color:var(--c-p);border-color:var(--c-p)}
+.ptab-z1{background:var(--bg-z1);color:var(--c-z1);border-color:var(--c-z1)}
+.ptab-z2{background:var(--bg-z2);color:var(--c-z2);border-color:var(--c-z2)}
+.ptab-z3{background:var(--bg-z3);color:var(--c-z3);border-color:var(--c-z3)}
 .ptab.disabled{opacity:.35;pointer-events:none}
 
 /* ── NAV ── */
@@ -142,7 +142,7 @@ select:focus,input:focus{border-color:var(--green)}
 .badges{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .badge{font-size:10px;font-family:'DM Mono',monospace;padding:2px 7px;border-radius:5px;font-weight:500}
 .bl{background:#EFF6FF;color:#1D4ED8}.bh{background:#FEF3C7;color:#92400E}.bm{background:#F0FDF4;color:var(--green)}
-.bt{background:var(--bg-t);color:var(--c-t)}.bc{background:var(--bg-c);color:var(--c-c)}.bp{background:var(--bg-p);color:var(--c-p)}
+.bt{background:var(--bg-z1);color:var(--c-z1)}.bc{background:var(--bg-z2);color:var(--c-z2)}.bp{background:var(--bg-z3);color:var(--c-z3)}
 .del-btn{background:none;border:none;color:var(--muted);font-size:15px;cursor:pointer;padding:0 2px}
 
 /* ── STATS ── */
@@ -365,8 +365,8 @@ select:focus,input:focus{border-color:var(--green)}
   <div id="screen-config" class="screen">
     <div style="height:10px"></div>
     <div class="emp-hdr">
-      <div class="emp-name">Agrícola Origen</div>
-      <div class="emp-sub">Sistema de Registro · Tomate Invernadero</div>
+      <div class="emp-name">Los Arrayanes</div>
+      <div class="emp-sub">Olmué · Tomate Invernadero</div>
     </div>
     <!-- resumen predios -->
     <div id="prediosOv"></div>
@@ -639,7 +639,7 @@ function selPredio(id){
   activePred=id;
   document.querySelectorAll('.ptab').forEach(t=>{
     t.className='ptab'+(isAdmin()||currentProfile.predioId===t.dataset.id?'':' disabled');
-    if(t.dataset.id===id)t.classList.add('ptab-'+{transito:'t',constancia:'c',paradero:'p'}[id]);
+    if(t.dataset.id===id)t.classList.add('ptab-'+{z1:'z1',z2:'z2',z3:'z3'}[id]);
   });
   loadPredioData(id);
 }
@@ -704,7 +704,7 @@ function getCicloAbierto(predioId,subjefe){
 // CONTEXT PILL
 // ══════════════════════════════════════════════
 function ctxHTML(){
-  const p=pD(),pc={transito:'t',constancia:'c',paradero:'p'}[activePred];
+  const p=pD(),pc={z1:'z1',z2:'z2',z3:'z3'}[activePred];
   const rows=p.subjefes.map(s=>{
     const c=getCicloEn(activePred,s,selDate);
     const badge=c
@@ -831,7 +831,7 @@ function renderHoy(){
 
 function eHTML(e,pred=activePred){
   const w=pWs().find(x=>x.id===e.workerId);
-  const pc={transito:'t',constancia:'c',paradero:'p'}[pred];
+  const pc={z1:'z1',z2:'z2',z3:'z3'}[pred];
   const ciclo=w?getCicloEn(pred,w.subjefe,e.fecha):null;
   const labores=e.labores||[{laborId:e.laborId,horas:e.horas||0,mesas:e.mesas||0}];
   const totalH=labores.reduce((s,l)=>s+(l.horas||0),0);
@@ -989,7 +989,7 @@ function renderCiclos(){
   const subjefes=showAll?pD().subjefes:pD().subjefes.filter(s=>s===userSubjefe()||isAdmin());
   PRED_ORDER.forEach(pid=>{
     if(!isAdmin()&&pid!==activePred)return;
-    const p=PREDIOS[pid],pc={transito:'t',constancia:'c',paradero:'p'}[pid];
+    const p=PREDIOS[pid],pc={z1:'z1',z2:'z2',z3:'z3'}[pid];
     const pl=document.createElement('div');pl.className='pred-label';
     pl.innerHTML=`<div class="pred-label-dot" style="background:var(--c-${pc})"></div><span class="pred-label-name" style="color:var(--c-${pc})">${p.nombre}</span>`;
     div.appendChild(pl);
@@ -1272,7 +1272,7 @@ async function renderConfig(){
   document.getElementById('nS').innerHTML=pD().subjefes.map(s=>`<option>${s}</option>`).join('');
   // predios overview
   document.getElementById('prediosOv').innerHTML=PRED_ORDER.map(pid=>{
-    const p=PREDIOS[pid],pc={transito:'t',constancia:'c',paradero:'p'}[pid];
+    const p=PREDIOS[pid],pc={z1:'z1',z2:'z2',z3:'z3'}[pid];
     const ws=wMap[pid]||[],rs=rCache.length;
     return `<div class="group-block" style="margin-bottom:9px">
       <div class="gb-header">
