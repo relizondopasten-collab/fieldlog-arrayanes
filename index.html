@@ -664,7 +664,7 @@ async function loadPredioData(pid){
         rCache=snap.docs.map(d=>({id:d.id,...d.data()}));
         buildSem();renderHoy();
         if(document.getElementById('screen-avance').classList.contains('active'))renderAvance();
-        if(document.getElementById('screen-prog').classList.contains('active'))renderProg();
+        if(document.getElementById('screen-prog').classList.contains('active')){populateProgSubjefe();renderProg();}
       });
 
     // Live listener for ciclos per subjefe
