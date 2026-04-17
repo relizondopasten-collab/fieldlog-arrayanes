@@ -308,6 +308,7 @@ select:focus,input:focus{border-color:var(--green)}
       <div class="form-row"><label>Trabajador</label><select id="selW" onchange="checkAusente()"><option value="">— Seleccionar —</option></select></div>
       <div id="ausenteSection" style="display:none;background:var(--cream);border:1.5px solid var(--sand);border-radius:11px;padding:10px 12px;margin-bottom:9px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkAusente" onchange="toggleReemplazo()" style="width:16px;height:16px;accent-color:var(--red);cursor:pointer"><label for="chkAusente" style="font-size:12px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">Trabajador ausente</label></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkLicencia" style="width:16px;height:16px;accent-color:#7C3AED;cursor:pointer"><label for="chkLicencia" style="font-size:12px;font-weight:600;color:#7C3AED;text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">Licencia médica</label></div>
         <div id="reemplazoDiv" style="display:none"><label>Reemplazante</label><select id="selReemplazo"><option value="">— Seleccionar reemplazante —</option></select></div>
       </div>
       <div style="margin-bottom:4px">
@@ -758,7 +759,8 @@ function filtW(){
       Object.entries(wMap).flatMap(([pid,ws])=>
         ws.filter(w=>w.id!==cur).map(w=>`<option value="${pid}|${w.id}">${w.nombre} (${PREDIOS[pid].nombre})</option>`)
       ).join('')+
-      `<option value="otro|otro">Otro (externo)</option>`;
+      `<option value="otro|otro">Otro (externo)</option>`+
+      `<option value="sin|sin">Sin reemplazo disponible</option>`;
   }
 }
 
@@ -852,8 +854,8 @@ function eHTML(e,pred=activePred){
     const esOtro=e.reemplazoWorkerId==='otro';
     const rw=(!esOtro&&e.reemplazoWorkerId)?(wMap[e.reemplazoPredioId]||[]).find(x=>x.id===e.reemplazoWorkerId):null;
     reemplazoHTML=`<div style="background:#FEE2E2;border-radius:7px;padding:5px 9px;margin-top:5px;font-size:11px;color:var(--red);display:flex;align-items:center;gap:5px">
-      <span>⚠️ Ausente</span>
-      ${esOtro?`<span style="color:var(--text)">· Reemplazado por <strong>Otro (externo)</strong></span>`:rw?`<span style="color:var(--text)">· Reemplazado por <strong>${rw.nombre}</strong>${e.reemplazoPredioId!==pred?` (${PREDIOS[e.reemplazoPredioId].nombre})`:''}</span>`:''}
+      <span>⚠️ Ausente</span>${e.licencia?' <span style="background:#EDE9FE;color:#7C3AED;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">🏥 Licencia médica</span>':''}
+      ${e.reemplazoWorkerId==='sin'?`<span style="color:var(--text)">· Sin reemplazo disponible</span>`:esOtro?`<span style="color:var(--text)">· Reemplazado por <strong>Otro (externo)</strong></span>`:rw?`<span style="color:var(--text)">· Reemplazado por <strong>${rw.nombre}</strong>${e.reemplazoPredioId!==pred?` (${PREDIOS[e.reemplazoPredioId].nombre})`:''}</span>`:''}
     </div>`;
   }
 
@@ -901,7 +903,8 @@ async function guardar(){
   const ausente=document.getElementById('chkAusente').checked;
   const reemplazoVal=document.getElementById('selReemplazo').value;
   if(!wId){toast('⚠️ Selecciona un trabajador');return}
-  if(ausente&&!reemplazoVal){toast('⚠️ Selecciona un reemplazante');return}
+  const licencia=document.getElementById('chkLicencia').checked;
+  if(ausente&&!reemplazoVal&&!licencia){toast('⚠️ Selecciona un reemplazante o marca licencia médica');return}
   const rows=document.querySelectorAll('#laborRows .labor-row');
   const labores=[];let hasError=false;
   rows.forEach(row=>{
@@ -914,8 +917,10 @@ async function guardar(){
     const cajas=cajasInput?parseInt(cajasInput.value)||0:0;
     labores.push({laborId:lId,horas,mesas,cajas});
   });
-  if(hasError){toast('⚠️ Selecciona labor en cada fila');return}
-  if(!labores.length){toast('⚠️ Agrega al menos una labor');return}
+  const sinReemplazo=reemplazoVal==='sin|reemplazo'||reemplazoVal==='sin|sin';
+  const skipLabores=licencia||(ausente&&sinReemplazo)||(ausente&&!reemplazoVal);
+  if(!skipLabores&&hasError){toast('⚠️ Selecciona labor en cada fila');return}
+  if(!skipLabores&&!labores.length){toast('⚠️ Agrega al menos una labor');return}
   let reemplazoPredioId=null,reemplazoWorkerId=null;
   if(ausente&&reemplazoVal){[reemplazoPredioId,reemplazoWorkerId]=reemplazoVal.split('|')}
   loading(true,'Guardando…');
