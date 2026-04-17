@@ -474,7 +474,7 @@ const LABORES=[
   {id:51,d:"Ventilación"},{id:52,d:"Vibrado al alambre"},{id:53,d:"Aplicación hormona en flores"},
   {id:54,d:"Colocar hilo blanco extra"},{id:55,d:"Deshoje total bajo 2° racimo"},
   {id:56,d:"Deshoje bajo 3° racimo (verano)"},{id:57,d:"Chip de quillay en mesa plantación"},
-  {id:58,d:"Fertilizantes en mesa (base)"},{id:59,d:"Asperjar ácido peracético (botrytis)"},{id:60,d:"Recoger tomates del pasillo"}
+  {id:58,d:"Fertilizantes en mesa (base)"},{id:59,d:"Asperjar ácido peracético (botrytis)"},{id:60,d:"Recoger tomates del pasillo"},{id:61,d:"Desbrote"}
 ];
 
 // ══════════════════════════════════════════════
@@ -785,12 +785,20 @@ function addLaborRow(){
   if(cur>=MAX_LAB){toast('Máximo 4 labores por entrada');return}
   const idx=cur+1,row=document.createElement('div');row.className='labor-row';row.dataset.idx=idx;
   row.innerHTML=`<div class="labor-row-num"><span>Labor ${idx}</span>${idx>1?`<button class="rm-labor" onclick="rmLaborRow(this)">✕</button>`:''}</div>
-    <div class="labor-sel"><select class="lr-labor">${laborOptsHTML()}</select></div>
+    <div class="labor-sel"><select class="lr-labor" onchange="checkCosecha(this)">${laborOptsHTML()}</select></div>
     <div class="labor-nums">
       <div><label>Horas</label><input type="number" class="lr-horas" placeholder="7.5" min="0" max="14" step="0.5"></div>
       <div><label>N° mesas</label><input type="number" class="lr-mesas" placeholder="32" min="0"></div>
+    </div>
+    <div class="lr-cajas-row" style="display:none;margin-top:7px">
+      <div><label>N° cajas cosechadas</label><input type="number" class="lr-cajas" placeholder="Ej: 45" min="0"></div>
     </div>`;
   cont.appendChild(row);updateLaborUI();
+}
+function checkCosecha(sel){
+  const row=sel.closest('.labor-row');
+  const cajasRow=row.querySelector('.lr-cajas-row');
+  if(cajasRow)cajasRow.style.display=parseInt(sel.value)===48?'block':'none';
 }
 function rmLaborRow(btn){
   btn.closest('.labor-row').remove();
@@ -858,6 +866,7 @@ function eHTML(e,pred=activePred){
         <div style="display:flex;gap:5px;margin-top:3px">
           ${lr.horas?`<span class="badge bh">⏱ ${lr.horas}h</span>`:''}
           ${lr.mesas?`<span class="badge bm">🪴 ${lr.mesas} mesas</span>`:''}
+          ${lr.cajas?`<span class="badge" style="background:#FEE2E2;color:#9F1239">📦 ${lr.cajas} cajas</span>`:''}
         </div>
       </div>
     </div>`;
@@ -901,7 +910,9 @@ async function guardar(){
     const mesas=parseInt(row.querySelector('.lr-mesas').value)||0;
     if(!lId){row.querySelector('.lr-labor').style.borderColor='var(--red)';hasError=true;return}
     row.querySelector('.lr-labor').style.borderColor='';
-    labores.push({laborId:lId,horas,mesas});
+    const cajasInput=row.querySelector('.lr-cajas');
+    const cajas=cajasInput?parseInt(cajasInput.value)||0:0;
+    labores.push({laborId:lId,horas,mesas,cajas});
   });
   if(hasError){toast('⚠️ Selecciona labor en cada fila');return}
   if(!labores.length){toast('⚠️ Agrega al menos una labor');return}
