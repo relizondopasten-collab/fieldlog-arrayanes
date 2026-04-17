@@ -493,7 +493,7 @@ const db   = firebase.firestore();
 
 const colWorkers  = pid => db.collection('arr_workers').doc(pid).collection('list');
 const colRegistros= pid => db.collection('arr_registros').doc(pid).collection('entries');
-const colCiclos   = (pid,sub) => db.collection('arr_ciclos').doc(pid).collection('subjefes').doc(sub).collection('cycles');
+const colCiclos   = (pid,sub) => db.collection('arr_ciclos').doc(pid+'_'+sub).collection('cycles');
 const colProg     = (pid,sub) => db.collection('arr_programacion').doc(pid).collection('subjefes').doc(sub).collection('semanas');
 const colUsers    = () => db.collection('arr_users');
 
