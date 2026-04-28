@@ -24,6 +24,7 @@ const FIREBASE_CONFIG = {
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
@@ -294,6 +295,7 @@ select:focus,input:focus{border-color:var(--green)}
       <button class="nb"        onclick="showScr('prog',this)">Prog.</button>
       <button class="nb"        onclick="showScr('avance',this)">Avance</button>
       <button class="nb"        onclick="showScr('ciclos',this)">Ciclos</button>
+      <button class="nb" id="navInformes" style="display:none" onclick="showScr('informes',this)">Informes</button>
       <button class="nb"        onclick="showScr('config',this)">Config</button>
     </div>
   </div>
@@ -337,6 +339,11 @@ select:focus,input:focus{border-color:var(--green)}
         </div>
         <button onclick="progNavSem(+1)" style="background:var(--sand);border:none;border-radius:8px;padding:6px 10px;font-size:16px;cursor:pointer">›</button>
       </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;background:var(--cream);border-radius:8px;padding:8px 10px">
+        <span style="font-size:11px;color:var(--muted);font-weight:600">📅 Ir a semana:</span>
+        <input type="date" id="progDatePicker" onchange="progGoToWeek(this.value)" style="flex:1;padding:5px 8px;border:1px solid var(--sand);border-radius:6px;font-size:12px;font-family:'DM Mono',monospace">
+        <button onclick="progGoToWeek('')" title="Volver a semana actual" style="background:var(--sand);border:none;border-radius:6px;padding:5px 9px;font-size:11px;font-weight:600;cursor:pointer">Hoy</button>
+      </div>
       <div class="form-row" style="margin:0"><label>Subjefe</label><select id="progSubjefe" onchange="renderProg()"><option value="">— Seleccionar —</option></select></div>
     </div>
     <div id="progContent"></div>
@@ -360,6 +367,28 @@ select:focus,input:focus{border-color:var(--green)}
       <p style="font-size:12px;color:var(--muted);line-height:1.5">Abre un ciclo al comenzar una temporada, ciérralo cuando termina. Entre ciclos puede haber días sin cultivo.</p>
     </div>
     <div id="ciclosContent"></div>
+  </div>
+
+  <!-- INFORMES (admin only) -->
+  <div id="screen-informes" class="screen">
+    <div style="height:10px"></div>
+    <div class="card" style="padding:12px 14px">
+      <div class="card-title">📊 Informes</div>
+      <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px">Descarga reportes en Excel con la información del periodo seleccionado.</p>
+      <div class="form-row"><label>Desde</label><input type="date" id="infDesde"></div>
+      <div class="form-row"><label>Hasta</label><input type="date" id="infHasta"></div>
+      <div class="form-row" style="margin-bottom:14px"><label>Subjefe (opcional)</label><select id="infSubjefe"><option value="">— Todos —</option></select></div>
+      <button class="btn btn-primary" onclick="generarInformeCompleto()" style="width:100%;margin-bottom:10px">📥 Descargar informe completo (Excel)</button>
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin:14px 0 8px">Reportes individuales</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <button class="btn btn-secondary" onclick="generarInforme('trabajadores')" style="font-size:11px;padding:8px">👤 Por trabajador</button>
+        <button class="btn btn-secondary" onclick="generarInforme('labores')" style="font-size:11px;padding:8px">🌱 Por labor</button>
+        <button class="btn btn-secondary" onclick="generarInforme('cumplimiento')" style="font-size:11px;padding:8px">🎯 Prog. vs Real</button>
+        <button class="btn btn-secondary" onclick="generarInforme('cosecha')" style="font-size:11px;padding:8px">📦 Cosecha</button>
+        <button class="btn btn-secondary" onclick="generarInforme('ausencias')" style="font-size:11px;padding:8px;grid-column:span 2">🏥 Ausencias y licencias</button>
+      </div>
+      <div id="infMsg" style="margin-top:10px;font-size:11px;color:var(--muted)"></div>
+    </div>
   </div>
 
   <!-- CONFIG -->
@@ -475,7 +504,7 @@ const LABORES=[
   {id:51,d:"Ventilación"},{id:52,d:"Vibrado al alambre"},{id:53,d:"Aplicación hormona en flores"},
   {id:54,d:"Colocar hilo blanco extra"},{id:55,d:"Deshoje total bajo 2° racimo"},
   {id:56,d:"Deshoje bajo 3° racimo (verano)"},{id:57,d:"Chip de quillay en mesa plantación"},
-  {id:58,d:"Fertilizantes en mesa (base)"},{id:59,d:"Asperjar ácido peracético (botrytis)"},{id:60,d:"Recoger tomates del pasillo"},{id:61,d:"Desbrote"}
+  {id:58,d:"Fertilizantes en mesa (base)"},{id:59,d:"Asperjar ácido peracético (botrytis)"},{id:60,d:"Recoger tomates del pasillo"},{id:61,d:"Desbrote"},{id:62,d:"Permiso"},{id:63,d:"Limpieza de pasillo (hojas podadas)"}
 ];
 
 // ══════════════════════════════════════════════
@@ -630,6 +659,8 @@ function applyRoleUI(){
   document.getElementById('clearDataBtn').style.display=isAdmin()?'block':'none';
   // Add worker button: only admin
   document.getElementById('addWBtn').style.display=isAdmin()?'block':'none';
+  // Informes tab: only admin
+  document.getElementById('navInformes').style.display=isAdmin()?'inline-flex':'none';
 }
 
 // ══════════════════════════════════════════════
@@ -787,7 +818,10 @@ function addLaborRow(){
   if(cur>=MAX_LAB){toast('Máximo 4 labores por entrada');return}
   const idx=cur+1,row=document.createElement('div');row.className='labor-row';row.dataset.idx=idx;
   row.innerHTML=`<div class="labor-row-num"><span>Labor ${idx}</span>${idx>1?`<button class="rm-labor" onclick="rmLaborRow(this)">✕</button>`:''}</div>
-    <div class="labor-sel"><select class="lr-labor" onchange="checkCosecha(this)">${laborOptsHTML()}</select></div>
+    <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:6px">
+      <div style="flex:0 0 70px"><label style="font-size:10px">Código</label><input type="number" class="lr-code" placeholder="#" min="1" max="99" style="text-align:center;font-family:'DM Mono',monospace;font-weight:600" oninput="onCodeTyped(this)"></div>
+      <div style="flex:1"><label style="font-size:10px">Labor (o selecciona de la lista)</label><select class="lr-labor" onchange="onLaborPicked(this)">${laborOptsHTML()}</select></div>
+    </div>
     <div class="labor-nums">
       <div><label>Horas</label><input type="number" class="lr-horas" placeholder="7.5" min="0" max="14" step="0.5"></div>
       <div><label>N° mesas</label><input type="number" class="lr-mesas" placeholder="32" min="0"></div>
@@ -801,6 +835,50 @@ function checkCosecha(sel){
   const row=sel.closest('.labor-row');
   const cajasRow=row.querySelector('.lr-cajas-row');
   if(cajasRow)cajasRow.style.display=parseInt(sel.value)===48?'block':'none';
+}
+
+// Cuando tipean un código, auto-seleccionar en el dropdown
+function onCodeTyped(inp){
+  const row=inp.closest('.labor-row');if(!row)return;
+  const code=parseInt(inp.value)||0;
+  const sel=row.querySelector('.lr-labor');
+  const labor=LABORES.find(l=>l.id===code);
+  if(labor){
+    sel.value=String(code);
+    inp.style.borderColor='var(--green)';
+    inp.style.background='#ECFDF5';
+    let hint=row.querySelector('.lr-hint');
+    if(!hint){hint=document.createElement('div');hint.className='lr-hint';hint.style.cssText='font-size:11px;color:var(--green);margin-top:-2px;margin-bottom:4px;font-weight:500';row.querySelector('.lr-code').parentElement.parentElement.after(hint);}
+    hint.textContent='✓ '+labor.d;
+    hint.style.display='block';
+  } else if(code>0){
+    sel.value='';
+    inp.style.borderColor='var(--red)';
+    inp.style.background='#FEF2F2';
+    const hint=row.querySelector('.lr-hint');if(hint)hint.style.display='none';
+  } else {
+    sel.value='';
+    inp.style.borderColor='';
+    inp.style.background='';
+    const hint=row.querySelector('.lr-hint');if(hint)hint.style.display='none';
+  }
+  checkCosecha(sel);
+}
+
+// Cuando seleccionan del dropdown, actualizar el código
+function onLaborPicked(sel){
+  const row=sel.closest('.labor-row');if(!row)return;
+  const code=row.querySelector('.lr-code');
+  code.value=sel.value||'';
+  if(sel.value){
+    code.style.borderColor='var(--green)';
+    code.style.background='#ECFDF5';
+  } else {
+    code.style.borderColor='';
+    code.style.background='';
+  }
+  const hint=row.querySelector('.lr-hint');if(hint)hint.style.display='none';
+  checkCosecha(sel);
 }
 function rmLaborRow(btn){
   btn.closest('.labor-row').remove();
@@ -926,7 +1004,7 @@ async function guardar(){
   loading(true,'Guardando…');
   try{
     await colRegistros(activePred).add({fecha:selDate,workerId:wId,labores,obs,
-      ausente:ausente||false,reemplazoPredioId,reemplazoWorkerId,
+      ausente:ausente||false,licencia:licencia||false,reemplazoPredioId,reemplazoWorkerId,
       ts:Date.now(),creadoPor:currentUser.uid});
     document.getElementById('iO').value='';
     document.getElementById('chkAusente').checked=false;
@@ -1155,6 +1233,18 @@ function progDayName(mondayIso,dayIso){
 }
 function getWeekNum(iso){const d=new Date(iso),sy=new Date(d.getFullYear(),0,1);return Math.ceil(((d-sy)/86400000+sy.getDay()+1)/7)}
 function progNavSem(delta){progWeekOffset+=delta;renderProg();}
+function progGoToWeek(iso){
+  if(!iso){progWeekOffset=0;renderProg();return;}
+  // Calcular el lunes de la semana de la fecha elegida
+  const d=new Date(iso+'T12:00:00');
+  const dow=d.getDay();
+  d.setDate(d.getDate()-(dow===0?6:dow-1));
+  const targetMonday=d.toISOString().slice(0,10);
+  const todayMonday=getProgMonday(0);
+  const diffDays=Math.round((new Date(targetMonday+'T12:00:00')-new Date(todayMonday+'T12:00:00'))/86400000);
+  progWeekOffset=Math.round(diffDays/7);
+  renderProg();
+}
 
 function populateProgSubjefe(){
   const sel=document.getElementById('progSubjefe');if(!sel)return;
@@ -1169,6 +1259,7 @@ async function renderProg(){
   const progDays=getProgDays(mondayIso);
   document.getElementById('progSemLabel').textContent=`Semana ${getWeekNum(mondayIso)} — programada el lunes`;
   document.getElementById('progSemRange').textContent=`${fDMY(mondayIso)} → ${fDMY(progDays[4])}`;
+  const dp=document.getElementById('progDatePicker');if(dp)dp.value=mondayIso;
   const subjefe=document.getElementById('progSubjefe').value;
   const contentDiv=document.getElementById('progContent');
   const newBtnDiv=document.getElementById('progNewBtn');
@@ -1412,6 +1503,230 @@ function closeModal(){document.getElementById('overlay').classList.remove('open'
 // ══════════════════════════════════════════════
 // SCREEN SWITCHER
 // ══════════════════════════════════════════════
+// ══════════════════════════════════════════════
+// INFORMES (admin)
+// ══════════════════════════════════════════════
+function initInformes(){
+  // Default: current month start to today
+  const t=new Date();
+  const first=new Date(t.getFullYear(),t.getMonth(),1).toISOString().slice(0,10);
+  const tod=t.toISOString().slice(0,10);
+  const dDesde=document.getElementById('infDesde'),dHasta=document.getElementById('infHasta');
+  if(!dDesde.value)dDesde.value=first;
+  if(!dHasta.value)dHasta.value=tod;
+  // Populate subjefe select
+  const sel=document.getElementById('infSubjefe');const cur=sel.value;
+  sel.innerHTML='<option value="">— Todos —</option>'+pD().subjefes.map(s=>`<option value="${s}">${s}</option>`).join('');
+  if(cur)sel.value=cur;
+  document.getElementById('infMsg').textContent='';
+}
+
+function getInfFiltros(){
+  const desde=document.getElementById('infDesde').value;
+  const hasta=document.getElementById('infHasta').value;
+  const subjefe=document.getElementById('infSubjefe').value;
+  if(!desde||!hasta){toast('⚠️ Selecciona fechas Desde y Hasta');return null}
+  if(desde>hasta){toast('⚠️ La fecha Desde debe ser menor o igual a Hasta');return null}
+  return {desde,hasta,subjefe};
+}
+
+function filtrarRegistros(f){
+  const ws=pWs();
+  return rCache.filter(r=>{
+    if(r.fecha<f.desde||r.fecha>f.hasta)return false;
+    if(f.subjefe){const w=ws.find(x=>x.id===r.workerId);if(!w||w.subjefe!==f.subjefe)return false}
+    return true;
+  });
+}
+
+async function fetchProgramaciones(f){
+  const subjefes=f.subjefe?[f.subjefe]:pD().subjefes;
+  const all=[];
+  for(const sub of subjefes){
+    try{
+      const snap=await colProg(activePred,sub).get();
+      snap.docs.forEach(d=>{
+        const data=d.data();
+        // Solo semanas que se solapan con el rango (lunes <= hasta y algún día >= desde)
+        if(data.semana&&data.dias){
+          const monday=data.semana;
+          const days=Object.keys(data.dias);
+          const hasOverlap=days.some(iso=>iso>=f.desde&&iso<=f.hasta);
+          if(hasOverlap)all.push({subjefe:sub,monday,dias:data.dias});
+        }
+      });
+    }catch(e){console.error('Error fetching prog for '+sub,e)}
+  }
+  return all;
+}
+
+function buildSheetTrabajadores(regs,ws){
+  const map={};
+  regs.forEach(r=>{
+    const w=ws.find(x=>x.id===r.workerId);if(!w)return;
+    const k=w.id;if(!map[k])map[k]={nombre:w.nombre,subjefe:w.subjefe,dias:new Set(),horas:0,mesas:0,cajas:0,ausencias:0,licencias:0};
+    map[k].dias.add(r.fecha);
+    if(r.ausente){if(r.licencia)map[k].licencias++;else map[k].ausencias++;return}
+    (r.labores||[]).forEach(l=>{map[k].horas+=l.horas||0;map[k].mesas+=l.mesas||0;map[k].cajas+=l.cajas||0});
+  });
+  const rows=[['Trabajador','Subjefe','Días reportados','Horas totales','Mesas totales','Cajas cosechadas','Ausencias','Licencias médicas']];
+  Object.values(map).sort((a,b)=>a.nombre.localeCompare(b.nombre)).forEach(m=>{
+    rows.push([m.nombre,m.subjefe,m.dias.size,Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.ausencias,m.licencias]);
+  });
+  return rows;
+}
+
+function buildSheetLabores(regs,ws){
+  const map={};
+  regs.forEach(r=>{
+    if(r.ausente)return;
+    (r.labores||[]).forEach(l=>{
+      const id=l.laborId;if(!map[id])map[id]={horas:0,mesas:0,cajas:0,trabajadores:new Set(),dias:new Set()};
+      map[id].horas+=l.horas||0;map[id].mesas+=l.mesas||0;map[id].cajas+=l.cajas||0;
+      map[id].trabajadores.add(r.workerId);map[id].dias.add(r.fecha);
+    });
+  });
+  const rows=[['Código','Labor','Horas totales','Mesas totales','Cajas','N° trabajadores','Días con esta labor']];
+  Object.keys(map).map(Number).sort((a,b)=>a-b).forEach(id=>{
+    const m=map[id];const lab=LABORES.find(x=>x.id===id);
+    rows.push([id,lab?lab.d:'(desconocida)',Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.trabajadores.size,m.dias.size]);
+  });
+  return rows;
+}
+
+function buildSheetCumplimientoFiltered(regs,ws,progs,f){
+  const rows=[['Fecha','Subjefe','Labor (cód.)','Labor (descripción)','Módulo','Meta mesas','Real mesas','Cumplimiento %']];
+  progs.forEach(p=>{
+    Object.keys(p.dias||{}).forEach(iso=>{
+      if(iso<f.desde||iso>f.hasta)return;
+      (p.dias[iso]||[]).forEach(t=>{
+        const lab=LABORES.find(x=>x.id===t.laborId);
+        const realMesas=regs.filter(r=>r.fecha===iso&&!r.ausente).reduce((s,r)=>{
+          const w=ws.find(x=>x.id===r.workerId);if(!w||w.subjefe!==p.subjefe)return s;
+          return s+(r.labores||[]).filter(l=>l.laborId===t.laborId).reduce((ss,l)=>ss+(l.mesas||0),0);
+        },0);
+        const meta=t.metaMesas||0;
+        const pct=meta>0?Math.round(realMesas/meta*100):'';
+        rows.push([iso,p.subjefe,t.laborId||'',lab?lab.d:'',t.modulo||'',meta||'',realMesas,pct]);
+      });
+    });
+  });
+  return rows;
+}
+
+function buildSheetCosecha(regs,ws){
+  const rows=[['Fecha','Trabajador','Subjefe','Mesas cosechadas','N° cajas']];
+  regs.forEach(r=>{
+    if(r.ausente)return;
+    const w=ws.find(x=>x.id===r.workerId);if(!w)return;
+    (r.labores||[]).forEach(l=>{
+      if(l.laborId===48){
+        rows.push([r.fecha,w.nombre,w.subjefe,l.mesas||0,l.cajas||0]);
+      }
+    });
+  });
+  // Ordenar por fecha luego trabajador
+  rows.splice(1,rows.length-1,...rows.slice(1).sort((a,b)=>a[0]===b[0]?a[1].localeCompare(b[1]):a[0].localeCompare(b[0])));
+  return rows;
+}
+
+function buildSheetAusencias(regs,ws){
+  const rows=[['Fecha','Trabajador','Subjefe','Tipo','Reemplazante']];
+  regs.filter(r=>r.ausente).forEach(r=>{
+    const w=ws.find(x=>x.id===r.workerId);if(!w)return;
+    let tipo=r.licencia?'Licencia médica':'Ausencia';
+    let reemp='';
+    if(r.reemplazoWorkerId&&r.reemplazoWorkerId!=='sin'){
+      const rw=(wMap[r.reemplazoPredioId]||[]).find(x=>x.id===r.reemplazoWorkerId);
+      reemp=rw?rw.nombre:'(externo)';
+    }else if(r.reemplazoWorkerId==='sin'){reemp='Sin reemplazo';}
+    rows.push([r.fecha,w.nombre,w.subjefe,tipo,reemp]);
+  });
+  rows.splice(1,rows.length-1,...rows.slice(1).sort((a,b)=>a[0]===b[0]?a[1].localeCompare(b[1]):a[0].localeCompare(b[0])));
+  return rows;
+}
+
+function aoaToSheet(rows){
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  // Calcular anchos automáticos
+  if(rows.length){
+    const widths=rows[0].map((_,c)=>{
+      const max=rows.reduce((m,r)=>{const v=r[c]==null?'':String(r[c]);return Math.max(m,v.length)},10);
+      return {wch:Math.min(50,max+2)};
+    });
+    ws['!cols']=widths;
+  }
+  return ws;
+}
+
+function descargarXLSX(wb,nombre){
+  XLSX.writeFile(wb,nombre);
+}
+
+async function generarInforme(tipo){
+  const f=getInfFiltros();if(!f)return;
+  const msg=document.getElementById('infMsg');msg.textContent='⏳ Generando…';
+  try{
+    const regs=filtrarRegistros(f);
+    const ws=pWs();
+    const wb=XLSX.utils.book_new();
+    let nombre='';
+    let datos;
+    if(tipo==='trabajadores'){datos=buildSheetTrabajadores(regs,ws);nombre='Por trabajador';}
+    else if(tipo==='labores'){datos=buildSheetLabores(regs,ws);nombre='Por labor';}
+    else if(tipo==='cumplimiento'){
+      const progs=await fetchProgramaciones(f);
+      datos=buildSheetCumplimientoFiltered(regs,ws,progs,f);nombre='Programado vs Real';
+    }
+    else if(tipo==='cosecha'){datos=buildSheetCosecha(regs,ws);nombre='Cosecha';}
+    else if(tipo==='ausencias'){datos=buildSheetAusencias(regs,ws);nombre='Ausencias y licencias';}
+    else{toast('Tipo de informe desconocido');return}
+    if(datos.length<=1){msg.textContent='⚠️ No hay datos en el rango seleccionado';toast('Sin datos para este informe');return}
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(datos),nombre.slice(0,31));
+    const filename=`Arrayanes_${nombre.replace(/[^\w]/g,'_')}_${f.desde}_a_${f.hasta}.xlsx`;
+    descargarXLSX(wb,filename);
+    msg.textContent='✅ Descargado: '+filename;
+  }catch(e){msg.textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+
+async function generarInformeCompleto(){
+  const f=getInfFiltros();if(!f)return;
+  const msg=document.getElementById('infMsg');msg.textContent='⏳ Generando informe completo…';
+  try{
+    const regs=filtrarRegistros(f);
+    const ws=pWs();
+    const progs=await fetchProgramaciones(f);
+    const wb=XLSX.utils.book_new();
+    // Hoja resumen
+    const pName=pD().nombre||activePred;
+    const resumen=[
+      ['Informe FieldLog — Los Arrayanes'],
+      [],
+      ['Predio',pName],
+      ['Periodo',`${f.desde}  →  ${f.hasta}`],
+      ['Subjefe',f.subjefe||'Todos'],
+      ['Generado',new Date().toLocaleString('es-CL')],
+      ['Total registros',regs.length],
+      [],
+      ['Hojas incluidas:'],
+      ['1. Por trabajador'],
+      ['2. Por labor'],
+      ['3. Programado vs Real'],
+      ['4. Cosecha'],
+      ['5. Ausencias y licencias']
+    ];
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(resumen),'Resumen');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetTrabajadores(regs,ws)),'Por trabajador');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetLabores(regs,ws)),'Por labor');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCumplimientoFiltered(regs,ws,progs,f)),'Prog vs Real');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCosecha(regs,ws)),'Cosecha');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetAusencias(regs,ws)),'Ausencias');
+    const filename=`Arrayanes_Informe_${f.desde}_a_${f.hasta}.xlsx`;
+    descargarXLSX(wb,filename);
+    msg.textContent='✅ Descargado: '+filename;
+  }catch(e){msg.textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+
 function showScr(name,btn){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
@@ -1422,6 +1737,7 @@ function showScr(name,btn){
   if(name==='ciclos')  renderCiclos();
   if(name==='config')  renderConfig();
   if(name==='prog')    {populateProgSubjefe();renderProg();}
+  if(name==='informes'){initInformes();}
 }
 </script>
 </body>
