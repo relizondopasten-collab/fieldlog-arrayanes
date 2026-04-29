@@ -309,8 +309,9 @@ select:focus,input:focus{border-color:var(--green)}
       <div class="form-row"><label>Subjefe / Encargado</label><select id="selSub" onchange="filtW()"><option value="">Todos</option></select></div>
       <div class="form-row"><label>Trabajador</label><select id="selW" onchange="checkAusente()"><option value="">— Seleccionar —</option></select></div>
       <div id="ausenteSection" style="display:none;background:var(--cream);border:1.5px solid var(--sand);border-radius:11px;padding:10px 12px;margin-bottom:9px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkAusente" onchange="toggleReemplazo()" style="width:16px;height:16px;accent-color:var(--red);cursor:pointer"><label for="chkAusente" style="font-size:12px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">Trabajador ausente</label></div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkLicencia" style="width:16px;height:16px;accent-color:#7C3AED;cursor:pointer"><label for="chkLicencia" style="font-size:12px;font-weight:600;color:#7C3AED;text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">Licencia médica</label></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkAusente" onchange="onChkAusente()" style="width:16px;height:16px;accent-color:var(--red);cursor:pointer"><label for="chkAusente" style="font-size:12px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">Trabajador ausente</label></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkLicencia" onchange="onChkLicencia()" style="width:16px;height:16px;accent-color:#7C3AED;cursor:pointer"><label for="chkLicencia" style="font-size:12px;font-weight:600;color:#7C3AED;text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">Licencia médica</label></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkVacaciones" onchange="onChkVacaciones()" style="width:16px;height:16px;accent-color:#F59E0B;cursor:pointer"><label for="chkVacaciones" style="font-size:12px;font-weight:600;color:#B45309;text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">🌴 Vacaciones</label></div>
         <div id="reemplazoDiv" style="display:none"><label>Reemplazante</label><select id="selReemplazo"><option value="">— Seleccionar reemplazante —</option></select></div>
       </div>
       <div style="margin-bottom:4px">
@@ -385,7 +386,7 @@ select:focus,input:focus{border-color:var(--green)}
         <button class="btn btn-secondary" onclick="generarInforme('labores')" style="font-size:11px;padding:8px">🌱 Por labor</button>
         <button class="btn btn-secondary" onclick="generarInforme('cumplimiento')" style="font-size:11px;padding:8px">🎯 Prog. vs Real</button>
         <button class="btn btn-secondary" onclick="generarInforme('cosecha')" style="font-size:11px;padding:8px">📦 Cosecha</button>
-        <button class="btn btn-secondary" onclick="generarInforme('ausencias')" style="font-size:11px;padding:8px;grid-column:span 2">🏥 Ausencias y licencias</button>
+        <button class="btn btn-secondary" onclick="generarInforme('ausencias')" style="font-size:11px;padding:8px;grid-column:span 2">🏥 Ausencias, licencias y vacaciones</button>
       </div>
       <div id="infMsg" style="margin-top:10px;font-size:11px;color:var(--muted)"></div>
     </div>
@@ -798,8 +799,36 @@ function filtW(){
 function checkAusente(){
   const wId=document.getElementById('selW').value;
   document.getElementById('ausenteSection').style.display=wId?'block':'none';
-  if(!wId){document.getElementById('chkAusente').checked=false;document.getElementById('reemplazoDiv').style.display='none';}
+  if(!wId){
+    document.getElementById('chkAusente').checked=false;
+    document.getElementById('chkLicencia').checked=false;
+    document.getElementById('chkVacaciones').checked=false;
+    document.getElementById('reemplazoDiv').style.display='none';
+  }
   filtW();
+}
+
+function onChkAusente(){
+  const c=document.getElementById('chkAusente').checked;
+  if(c){
+    document.getElementById('chkLicencia').checked=false;
+    document.getElementById('chkVacaciones').checked=false;
+  }
+  document.getElementById('reemplazoDiv').style.display=c?'block':'none';
+}
+function onChkLicencia(){
+  if(document.getElementById('chkLicencia').checked){
+    document.getElementById('chkAusente').checked=false;
+    document.getElementById('chkVacaciones').checked=false;
+    document.getElementById('reemplazoDiv').style.display='none';
+  }
+}
+function onChkVacaciones(){
+  if(document.getElementById('chkVacaciones').checked){
+    document.getElementById('chkAusente').checked=false;
+    document.getElementById('chkLicencia').checked=false;
+    document.getElementById('reemplazoDiv').style.display='none';
+  }
 }
 
 function toggleReemplazo(){
@@ -931,9 +960,12 @@ function eHTML(e,pred=activePred){
   if(e.ausente){
     const esOtro=e.reemplazoWorkerId==='otro';
     const rw=(!esOtro&&e.reemplazoWorkerId)?(wMap[e.reemplazoPredioId]||[]).find(x=>x.id===e.reemplazoWorkerId):null;
-    reemplazoHTML=`<div style="background:#FEE2E2;border-radius:7px;padding:5px 9px;margin-top:5px;font-size:11px;color:var(--red);display:flex;align-items:center;gap:5px">
-      <span>⚠️ Ausente</span>${e.licencia?' <span style="background:#EDE9FE;color:#7C3AED;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">🏥 Licencia médica</span>':''}
-      ${e.reemplazoWorkerId==='sin'?`<span style="color:var(--text)">· Sin reemplazo disponible</span>`:esOtro?`<span style="color:var(--text)">· Reemplazado por <strong>Otro (externo)</strong></span>`:rw?`<span style="color:var(--text)">· Reemplazado por <strong>${rw.nombre}</strong>${e.reemplazoPredioId!==pred?` (${PREDIOS[e.reemplazoPredioId].nombre})`:''}</span>`:''}
+    let bg='#FEE2E2',col='var(--red)',icon='⚠️ Ausente';
+    if(e.vacaciones){bg='#FEF3C7';col='#B45309';icon='🌴 Vacaciones';}
+    else if(e.licencia){bg='#EDE9FE';col='#7C3AED';icon='🏥 Licencia médica';}
+    reemplazoHTML=`<div style="background:${bg};border-radius:7px;padding:5px 9px;margin-top:5px;font-size:11px;color:${col};display:flex;align-items:center;gap:5px">
+      <span>${icon}</span>
+      ${(!e.licencia&&!e.vacaciones)?(e.reemplazoWorkerId==='sin'?`<span style="color:var(--text)">· Sin reemplazo disponible</span>`:esOtro?`<span style="color:var(--text)">· Reemplazado por <strong>Otro (externo)</strong></span>`:rw?`<span style="color:var(--text)">· Reemplazado por <strong>${rw.nombre}</strong>${e.reemplazoPredioId!==pred?` (${PREDIOS[e.reemplazoPredioId].nombre})`:''}</span>`:''):''}
     </div>`;
   }
 
@@ -951,7 +983,7 @@ function eHTML(e,pred=activePred){
       </div>
     </div>`;
   }).join('');
-  return `<div class="ecard" style="border-left-color:var(--c-${pc})${e.ausente?';border-left-color:var(--red)':''}">
+  return `<div class="ecard" style="border-left-color:var(--c-${pc})${e.ausente?(e.vacaciones?';border-left-color:#F59E0B':e.licencia?';border-left-color:#7C3AED':';border-left-color:var(--red)'):''}">
     <div class="ehdr">
       <div>
         <div class="ename" style="${e.ausente?'color:var(--muted);text-decoration:line-through':''}">${w?w.nombre:'—'}</div>
@@ -982,7 +1014,8 @@ async function guardar(){
   const reemplazoVal=document.getElementById('selReemplazo').value;
   if(!wId){toast('⚠️ Selecciona un trabajador');return}
   const licencia=document.getElementById('chkLicencia').checked;
-  if(ausente&&!reemplazoVal&&!licencia){toast('⚠️ Selecciona un reemplazante o marca licencia médica');return}
+  const vacaciones=document.getElementById('chkVacaciones').checked;
+  if(ausente&&!reemplazoVal){toast('⚠️ Selecciona un reemplazante');return}
   const rows=document.querySelectorAll('#laborRows .labor-row');
   const labores=[];let hasError=false;
   rows.forEach(row=>{
@@ -996,18 +1029,22 @@ async function guardar(){
     labores.push({laborId:lId,horas,mesas,cajas});
   });
   const sinReemplazo=reemplazoVal==='sin|reemplazo'||reemplazoVal==='sin|sin';
-  const skipLabores=licencia||(ausente&&sinReemplazo)||(ausente&&!reemplazoVal);
+  const skipLabores=licencia||vacaciones||(ausente&&sinReemplazo)||(ausente&&!reemplazoVal);
   if(!skipLabores&&hasError){toast('⚠️ Selecciona labor en cada fila');return}
   if(!skipLabores&&!labores.length){toast('⚠️ Agrega al menos una labor');return}
   let reemplazoPredioId=null,reemplazoWorkerId=null;
   if(ausente&&reemplazoVal){[reemplazoPredioId,reemplazoWorkerId]=reemplazoVal.split('|')}
+  // Para licencia/vacaciones marcamos ausente:true para que la lógica de reportes funcione igual
+  const flagAusente=ausente||licencia||vacaciones;
   loading(true,'Guardando…');
   try{
     await colRegistros(activePred).add({fecha:selDate,workerId:wId,labores,obs,
-      ausente:ausente||false,licencia:licencia||false,reemplazoPredioId,reemplazoWorkerId,
+      ausente:flagAusente,licencia:licencia||false,vacaciones:vacaciones||false,reemplazoPredioId,reemplazoWorkerId,
       ts:Date.now(),creadoPor:currentUser.uid});
     document.getElementById('iO').value='';
     document.getElementById('chkAusente').checked=false;
+    document.getElementById('chkLicencia').checked=false;
+    document.getElementById('chkVacaciones').checked=false;
     document.getElementById('reemplazoDiv').style.display='none';
     document.getElementById('ausenteSection').style.display='none';
     initLaborRows();
@@ -1564,14 +1601,19 @@ function buildSheetTrabajadores(regs,ws){
   const map={};
   regs.forEach(r=>{
     const w=ws.find(x=>x.id===r.workerId);if(!w)return;
-    const k=w.id;if(!map[k])map[k]={nombre:w.nombre,subjefe:w.subjefe,dias:new Set(),horas:0,mesas:0,cajas:0,ausencias:0,licencias:0};
+    const k=w.id;if(!map[k])map[k]={nombre:w.nombre,subjefe:w.subjefe,dias:new Set(),horas:0,mesas:0,cajas:0,ausencias:0,licencias:0,vacaciones:0};
     map[k].dias.add(r.fecha);
-    if(r.ausente){if(r.licencia)map[k].licencias++;else map[k].ausencias++;return}
+    if(r.ausente){
+      if(r.vacaciones)map[k].vacaciones++;
+      else if(r.licencia)map[k].licencias++;
+      else map[k].ausencias++;
+      return;
+    }
     (r.labores||[]).forEach(l=>{map[k].horas+=l.horas||0;map[k].mesas+=l.mesas||0;map[k].cajas+=l.cajas||0});
   });
-  const rows=[['Trabajador','Subjefe','Días reportados','Horas totales','Mesas totales','Cajas cosechadas','Ausencias','Licencias médicas']];
+  const rows=[['Trabajador','Subjefe','Días reportados','Horas totales','Mesas totales','Cajas cosechadas','Ausencias','Licencias médicas','Días vacaciones']];
   Object.values(map).sort((a,b)=>a.nombre.localeCompare(b.nombre)).forEach(m=>{
-    rows.push([m.nombre,m.subjefe,m.dias.size,Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.ausencias,m.licencias]);
+    rows.push([m.nombre,m.subjefe,m.dias.size,Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.ausencias,m.licencias,m.vacaciones]);
   });
   return rows;
 }
@@ -1634,7 +1676,9 @@ function buildSheetAusencias(regs,ws){
   const rows=[['Fecha','Trabajador','Subjefe','Tipo','Reemplazante']];
   regs.filter(r=>r.ausente).forEach(r=>{
     const w=ws.find(x=>x.id===r.workerId);if(!w)return;
-    let tipo=r.licencia?'Licencia médica':'Ausencia';
+    let tipo='Ausencia';
+    if(r.vacaciones)tipo='Vacaciones';
+    else if(r.licencia)tipo='Licencia médica';
     let reemp='';
     if(r.reemplazoWorkerId&&r.reemplazoWorkerId!=='sin'){
       const rw=(wMap[r.reemplazoPredioId]||[]).find(x=>x.id===r.reemplazoWorkerId);
@@ -1679,7 +1723,7 @@ async function generarInforme(tipo){
       datos=buildSheetCumplimientoFiltered(regs,ws,progs,f);nombre='Programado vs Real';
     }
     else if(tipo==='cosecha'){datos=buildSheetCosecha(regs,ws);nombre='Cosecha';}
-    else if(tipo==='ausencias'){datos=buildSheetAusencias(regs,ws);nombre='Ausencias y licencias';}
+    else if(tipo==='ausencias'){datos=buildSheetAusencias(regs,ws);nombre='Ausencias licencias y vacaciones';}
     else{toast('Tipo de informe desconocido');return}
     if(datos.length<=1){msg.textContent='⚠️ No hay datos en el rango seleccionado';toast('Sin datos para este informe');return}
     XLSX.utils.book_append_sheet(wb,aoaToSheet(datos),nombre.slice(0,31));
@@ -1713,7 +1757,7 @@ async function generarInformeCompleto(){
       ['2. Por labor'],
       ['3. Programado vs Real'],
       ['4. Cosecha'],
-      ['5. Ausencias y licencias']
+      ['5. Ausencias, licencias y vacaciones']
     ];
     XLSX.utils.book_append_sheet(wb,aoaToSheet(resumen),'Resumen');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetTrabajadores(regs,ws)),'Por trabajador');
