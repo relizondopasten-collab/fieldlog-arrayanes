@@ -310,9 +310,15 @@ select:focus,input:focus{border-color:var(--green)}
       <div class="form-row"><label>Trabajador</label><select id="selW" onchange="checkAusente()"><option value="">— Seleccionar —</option></select></div>
       <div id="ausenteSection" style="display:none;background:var(--cream);border:1.5px solid var(--sand);border-radius:11px;padding:10px 12px;margin-bottom:9px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkAusente" onchange="onChkAusente()" style="width:16px;height:16px;accent-color:var(--red);cursor:pointer"><label for="chkAusente" style="font-size:12px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">Trabajador ausente</label></div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkLicencia" onchange="onChkLicencia()" style="width:16px;height:16px;accent-color:#7C3AED;cursor:pointer"><label for="chkLicencia" style="font-size:12px;font-weight:600;color:#7C3AED;text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">Licencia médica</label></div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkVacaciones" onchange="onChkVacaciones()" style="width:16px;height:16px;accent-color:#F59E0B;cursor:pointer"><label for="chkVacaciones" style="font-size:12px;font-weight:600;color:#B45309;text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">🌴 Vacaciones</label></div>
-        <div id="reemplazoDiv" style="display:none"><label>Reemplazante</label><select id="selReemplazo"><option value="">— Seleccionar reemplazante —</option></select></div>
+        <div id="tipoAusenciaDiv" style="display:none">
+          <div style="background:#fff;border:1px solid var(--sand);border-radius:9px;padding:9px 11px;margin-bottom:8px">
+            <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px">Motivo</div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="sin" checked style="accent-color:var(--red);cursor:pointer">Sin justificación legal</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="licencia" style="accent-color:#7C3AED;cursor:pointer">🏥 Licencia médica</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="vacaciones" style="accent-color:#F59E0B;cursor:pointer">🌴 Vacaciones</label>
+          </div>
+          <div><label>Reemplazante (opcional)</label><select id="selReemplazo"><option value="">— Sin reemplazante —</option></select></div>
+        </div>
       </div>
       <div style="margin-bottom:4px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -801,39 +807,23 @@ function checkAusente(){
   document.getElementById('ausenteSection').style.display=wId?'block':'none';
   if(!wId){
     document.getElementById('chkAusente').checked=false;
-    document.getElementById('chkLicencia').checked=false;
-    document.getElementById('chkVacaciones').checked=false;
-    document.getElementById('reemplazoDiv').style.display='none';
+    const r=document.querySelector('input[name="tipoAusencia"][value="sin"]');if(r)r.checked=true;
+    document.getElementById('tipoAusenciaDiv').style.display='none';
   }
   filtW();
 }
 
 function onChkAusente(){
   const c=document.getElementById('chkAusente').checked;
-  if(c){
-    document.getElementById('chkLicencia').checked=false;
-    document.getElementById('chkVacaciones').checked=false;
-  }
-  document.getElementById('reemplazoDiv').style.display=c?'block':'none';
-}
-function onChkLicencia(){
-  if(document.getElementById('chkLicencia').checked){
-    document.getElementById('chkAusente').checked=false;
-    document.getElementById('chkVacaciones').checked=false;
-    document.getElementById('reemplazoDiv').style.display='none';
-  }
-}
-function onChkVacaciones(){
-  if(document.getElementById('chkVacaciones').checked){
-    document.getElementById('chkAusente').checked=false;
-    document.getElementById('chkLicencia').checked=false;
-    document.getElementById('reemplazoDiv').style.display='none';
+  document.getElementById('tipoAusenciaDiv').style.display=c?'block':'none';
+  if(!c){
+    const r=document.querySelector('input[name="tipoAusencia"][value="sin"]');if(r)r.checked=true;
+    const sel=document.getElementById('selReemplazo');if(sel)sel.value='';
   }
 }
 
 function toggleReemplazo(){
-  const checked=document.getElementById('chkAusente').checked;
-  document.getElementById('reemplazoDiv').style.display=checked?'block':'none';
+  /* legacy — replaced by onChkAusente */
 }
 
 // ══════════════════════════════════════════════
@@ -959,13 +949,16 @@ function eHTML(e,pred=activePred){
   let reemplazoHTML='';
   if(e.ausente){
     const esOtro=e.reemplazoWorkerId==='otro';
-    const rw=(!esOtro&&e.reemplazoWorkerId)?(wMap[e.reemplazoPredioId]||[]).find(x=>x.id===e.reemplazoWorkerId):null;
-    let bg='#FEE2E2',col='var(--red)',icon='⚠️ Ausente';
+    const rw=(!esOtro&&e.reemplazoWorkerId&&e.reemplazoWorkerId!=='sin')?(wMap[e.reemplazoPredioId]||[]).find(x=>x.id===e.reemplazoWorkerId):null;
+    let bg='#FEE2E2',col='var(--red)',icon='⚠️ Sin justificación';
     if(e.vacaciones){bg='#FEF3C7';col='#B45309';icon='🌴 Vacaciones';}
     else if(e.licencia){bg='#EDE9FE';col='#7C3AED';icon='🏥 Licencia médica';}
+    let reempTxt='';
+    if(e.reemplazoWorkerId==='sin'){reempTxt=`<span style="color:var(--text)">· Sin reemplazo disponible</span>`;}
+    else if(esOtro){reempTxt=`<span style="color:var(--text)">· Reemplazado por <strong>Otro (externo)</strong></span>`;}
+    else if(rw){reempTxt=`<span style="color:var(--text)">· Reemplazado por <strong>${rw.nombre}</strong>${e.reemplazoPredioId!==pred?` (${PREDIOS[e.reemplazoPredioId].nombre})`:''}</span>`;}
     reemplazoHTML=`<div style="background:${bg};border-radius:7px;padding:5px 9px;margin-top:5px;font-size:11px;color:${col};display:flex;align-items:center;gap:5px">
-      <span>${icon}</span>
-      ${(!e.licencia&&!e.vacaciones)?(e.reemplazoWorkerId==='sin'?`<span style="color:var(--text)">· Sin reemplazo disponible</span>`:esOtro?`<span style="color:var(--text)">· Reemplazado por <strong>Otro (externo)</strong></span>`:rw?`<span style="color:var(--text)">· Reemplazado por <strong>${rw.nombre}</strong>${e.reemplazoPredioId!==pred?` (${PREDIOS[e.reemplazoPredioId].nombre})`:''}</span>`:''):''}
+      <span>${icon}</span>${reempTxt}
     </div>`;
   }
 
@@ -1013,9 +1006,10 @@ async function guardar(){
   const ausente=document.getElementById('chkAusente').checked;
   const reemplazoVal=document.getElementById('selReemplazo').value;
   if(!wId){toast('⚠️ Selecciona un trabajador');return}
-  const licencia=document.getElementById('chkLicencia').checked;
-  const vacaciones=document.getElementById('chkVacaciones').checked;
-  if(ausente&&!reemplazoVal){toast('⚠️ Selecciona un reemplazante');return}
+  const tipoSel=document.querySelector('input[name="tipoAusencia"]:checked');
+  const tipo=ausente?(tipoSel?tipoSel.value:'sin'):null;
+  const licencia=tipo==='licencia';
+  const vacaciones=tipo==='vacaciones';
   const rows=document.querySelectorAll('#laborRows .labor-row');
   const labores=[];let hasError=false;
   rows.forEach(row=>{
@@ -1028,24 +1022,23 @@ async function guardar(){
     const cajas=cajasInput?parseInt(cajasInput.value)||0:0;
     labores.push({laborId:lId,horas,mesas,cajas});
   });
-  const sinReemplazo=reemplazoVal==='sin|reemplazo'||reemplazoVal==='sin|sin';
-  const skipLabores=licencia||vacaciones||(ausente&&sinReemplazo)||(ausente&&!reemplazoVal);
+  // Si el trabajador está ausente y no hay reemplazante seleccionado, se omiten labores.
+  // Si hay reemplazante, las labores ingresadas corresponden al trabajo realizado por el reemplazante.
+  const skipLabores=ausente&&!reemplazoVal;
   if(!skipLabores&&hasError){toast('⚠️ Selecciona labor en cada fila');return}
   if(!skipLabores&&!labores.length){toast('⚠️ Agrega al menos una labor');return}
   let reemplazoPredioId=null,reemplazoWorkerId=null;
   if(ausente&&reemplazoVal){[reemplazoPredioId,reemplazoWorkerId]=reemplazoVal.split('|')}
-  // Para licencia/vacaciones marcamos ausente:true para que la lógica de reportes funcione igual
-  const flagAusente=ausente||licencia||vacaciones;
   loading(true,'Guardando…');
   try{
     await colRegistros(activePred).add({fecha:selDate,workerId:wId,labores,obs,
-      ausente:flagAusente,licencia:licencia||false,vacaciones:vacaciones||false,reemplazoPredioId,reemplazoWorkerId,
+      ausente:ausente||false,licencia:licencia||false,vacaciones:vacaciones||false,reemplazoPredioId,reemplazoWorkerId,
       ts:Date.now(),creadoPor:currentUser.uid});
     document.getElementById('iO').value='';
     document.getElementById('chkAusente').checked=false;
-    document.getElementById('chkLicencia').checked=false;
-    document.getElementById('chkVacaciones').checked=false;
-    document.getElementById('reemplazoDiv').style.display='none';
+    const rDef=document.querySelector('input[name="tipoAusencia"][value="sin"]');if(rDef)rDef.checked=true;
+    const sel=document.getElementById('selReemplazo');if(sel)sel.value='';
+    document.getElementById('tipoAusenciaDiv').style.display='none';
     document.getElementById('ausenteSection').style.display='none';
     initLaborRows();
     toast('✅ Entrada guardada');
@@ -1676,7 +1669,7 @@ function buildSheetAusencias(regs,ws){
   const rows=[['Fecha','Trabajador','Subjefe','Tipo','Reemplazante']];
   regs.filter(r=>r.ausente).forEach(r=>{
     const w=ws.find(x=>x.id===r.workerId);if(!w)return;
-    let tipo='Ausencia';
+    let tipo='Sin justificación';
     if(r.vacaciones)tipo='Vacaciones';
     else if(r.licencia)tipo='Licencia médica';
     let reemp='';
