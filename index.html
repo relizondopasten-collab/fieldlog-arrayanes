@@ -752,8 +752,14 @@ auth.onAuthStateChanged(async user=>{
   try{
     const snap=await colUsers().doc(user.uid).get();
     if(!snap.exists){
-      // First time: create admin profile automatically
-      currentProfile={email:user.email,nombre:user.email.split('@')[0],role:'admin',predioId:'todos',subjefe:''};
+      // Sin perfil: si es el PRIMER usuario del sistema queda admin;
+      // los demás entran como subjefe sin zona (el admin les asigna rol/zona en Config).
+      const allSnap=await colUsers().get();
+      if(allSnap.empty){
+        currentProfile={email:user.email,nombre:user.email.split('@')[0],role:'admin',predioId:'todos',subjefe:''};
+      } else {
+        currentProfile={email:user.email,nombre:user.email.split('@')[0],role:'subjefe',predioId:'z1',subjefe:''};
+      }
       await colUsers().doc(user.uid).set(currentProfile);
     } else {
       currentProfile=snap.data();
@@ -1774,6 +1780,10 @@ async function loadUsers(){
         <div class="ur-name">${u.nombre||u.email}</div>
         <div class="ur-meta">${u.email} · <span class="role-badge ${u.role==='admin'?'role-admin':'role-subjefe'}">${u.role}</span> · ${u.predioId||'—'} ${u.subjefe?'· '+u.subjefe:''}</div>
       </div>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        <button class="btn btn-secondary btn-sm" onclick="modalEditarUsuario('${u.uid}')">✏️</button>
+        ${u.uid!==(currentUser&&currentUser.uid)?`<button class="btn btn-danger btn-sm" onclick="eliminarPerfilUsuario('${u.uid}')">✕</button>`:''}
+      </div>
     </div>`).join('')||'<div style="font-size:12px;color:var(--muted)">Sin usuarios aún</div>';
   }catch(e){console.error(e)}
 }
@@ -1804,6 +1814,71 @@ async function createUser(){
   }catch(e){
     toast('Error: '+(e.code==='auth/email-already-in-use'?'Email ya registrado':e.message));
   }
+  loading(false);
+}
+
+// Borra solo el PERFIL (rol/zona) en la base. La cuenta de acceso (email+contraseña)
+// se elimina aparte en la consola de Firebase → Authentication.
+async function eliminarPerfilUsuario(uid){
+  if(!isAdmin()){toast('Solo admin puede eliminar');return}
+  const u=usersCache.find(x=>x.uid===uid);
+  if(!confirm(`¿Eliminar el perfil de ${u?(u.nombre||u.email):'este usuario'}?\n\nÚsalo para limpiar perfiles de cuentas ya borradas en Firebase. Si la cuenta aún existe y la persona vuelve a entrar, se le creará un perfil nuevo de Subjefe.`))return;
+  loading(true,'Eliminando…');
+  try{
+    await colUsers().doc(uid).delete();
+    loadUsers();toast('🗑 Perfil eliminado');
+  }catch(e){toast('Error: '+e.message)}
+  loading(false);
+}
+
+// ── Editar rol / zona de un usuario existente (admin) ──
+function modalEditarUsuario(uid){
+  if(!isAdmin())return;
+  const u=usersCache.find(x=>x.uid===uid);if(!u)return;
+  const allSubs=[...new Set(PRED_ORDER.flatMap(p=>PREDIOS[p].subjefes))];
+  document.getElementById('modalContent').innerHTML=`
+    <div class="modal-title">✏️ Editar usuario</div>
+    <div class="modal-sub">${u.email}</div>
+    <div class="form-row"><label>Nombre visible</label><input type="text" id="euNombre" value="${(u.nombre||'').replace(/"/g,'&quot;')}"></div>
+    <div class="form-grid">
+      <div><label>Rol</label>
+        <select id="euRole" onchange="if(this.value==='admin')document.getElementById('euPredio').value='todos'">
+          <option value="subjefe"${u.role!=='admin'?' selected':''}>Subjefe</option>
+          <option value="admin"${u.role==='admin'?' selected':''}>Admin / Gerencia</option>
+        </select>
+      </div>
+      <div><label>Predio / Zona</label>
+        <select id="euPredio">
+          ${['z1','z2','z3'].map(p=>`<option value="${p}"${u.predioId===p?' selected':''}>${PREDIOS[p].nombre}</option>`).join('')}
+          <option value="todos"${u.predioId==='todos'?' selected':''}>Todos (admin)</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row"><label>Subjefe asignado</label>
+      <select id="euSubjefe">
+        <option value=""${!u.subjefe?' selected':''}>— (no aplica) —</option>
+        ${allSubs.map(s=>`<option${u.subjefe===s?' selected':''}>${s}</option>`).join('')}
+      </select>
+    </div>
+    <button class="btn btn-primary" onclick="guardarEdicionUsuario('${uid}')">Guardar cambios</button>`;
+  document.getElementById('overlay').classList.add('open');
+}
+async function guardarEdicionUsuario(uid){
+  if(!isAdmin()){toast('Solo admin puede editar usuarios');return}
+  const role=document.getElementById('euRole').value;
+  const predioId=document.getElementById('euPredio').value;
+  const subjefe=document.getElementById('euSubjefe').value;
+  const nombre=document.getElementById('euNombre').value.trim();
+  if(role==='subjefe'&&!subjefe){toast('⚠️ Para rol Subjefe asigna un subjefe');return}
+  if(uid===currentUser.uid&&role!=='admin'&&!confirm('Estás quitándote a TI MISMO el rol de administrador. ¿Seguro? Podrías quedar sin acceso a Config/Informes.'))return;
+  loading(true,'Guardando…');
+  try{
+    const upd={role,predioId,subjefe};
+    if(nombre)upd.nombre=nombre;
+    await colUsers().doc(uid).update(upd);
+    if(uid===currentUser.uid){currentProfile={...currentProfile,role,predioId,subjefe,nombre:nombre||currentProfile.nombre};applyRoleUI();}
+    closeModal();loadUsers();toast('✅ Usuario actualizado');
+  }catch(e){toast('Error: '+e.message)}
   loading(false);
 }
 
