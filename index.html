@@ -313,9 +313,28 @@ select:focus,input:focus{border-color:var(--green)}
         <div id="tipoAusenciaDiv" style="display:none">
           <div style="background:#fff;border:1px solid var(--sand);border-radius:9px;padding:9px 11px;margin-bottom:8px">
             <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px">Motivo</div>
-            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="sin" checked style="accent-color:var(--red);cursor:pointer">Sin justificación legal</label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="licencia" style="accent-color:#7C3AED;cursor:pointer">🏥 Licencia médica</label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="vacaciones" style="accent-color:#F59E0B;cursor:pointer">🌴 Vacaciones</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="sin" checked onchange="onTipoAusencia()" style="accent-color:var(--red);cursor:pointer">⚠️ Sin justificación legal</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="justificada" onchange="onTipoAusencia()" style="accent-color:#0EA5E9;cursor:pointer">📄 Justificada</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="licencia" onchange="onTipoAusencia()" style="accent-color:#7C3AED;cursor:pointer">🏥 Licencia médica</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="vacaciones" onchange="onTipoAusencia()" style="accent-color:#F59E0B;cursor:pointer">🌴 Vacaciones</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer"><input type="radio" name="tipoAusencia" value="retiro" onchange="onTipoAusencia()" style="accent-color:#9F1239;cursor:pointer">🚪 Retiro</label>
+          </div>
+          <!-- Jornada AM/PM: para sin justificación, justificada y retiro -->
+          <div id="ausJornadaDiv" style="background:#fff;border:1px solid var(--sand);border-radius:9px;padding:9px 11px;margin-bottom:8px">
+            <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px">Periodo del día</div>
+            <div style="display:flex;gap:16px">
+              <label style="display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer;margin:0;text-transform:none;font-weight:600;color:var(--text)"><input type="checkbox" id="chkAusAM" checked style="width:15px;height:15px;accent-color:var(--green);cursor:pointer">🌅 AM</label>
+              <label style="display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer;margin:0;text-transform:none;font-weight:600;color:var(--text)"><input type="checkbox" id="chkAusPM" checked style="width:15px;height:15px;accent-color:var(--green);cursor:pointer">🌇 PM</label>
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:5px">Marca AM y PM si faltó el día completo, o solo uno si se ausentó medio día.</div>
+          </div>
+          <!-- Periodo con calendario: para licencia médica y vacaciones -->
+          <div id="ausPeriodoDiv" style="display:none;background:#fff;border:1px solid var(--sand);border-radius:9px;padding:9px 11px;margin-bottom:8px">
+            <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px">Periodo</div>
+            <div class="form-grid" style="margin-bottom:0">
+              <div><label>Inicio</label><input type="date" id="ausIni"></div>
+              <div><label>Término</label><input type="date" id="ausFin"></div>
+            </div>
           </div>
           <div><label>Reemplazante (opcional)</label><select id="selReemplazo"><option value="">— Sin reemplazante —</option></select></div>
         </div>
@@ -392,10 +411,14 @@ select:focus,input:focus{border-color:var(--green)}
         <button class="btn btn-secondary" onclick="generarInforme('labores')" style="font-size:11px;padding:8px">🌱 Por labor</button>
         <button class="btn btn-secondary" onclick="generarInforme('cumplimiento')" style="font-size:11px;padding:8px">🎯 Prog. vs Real</button>
         <button class="btn btn-secondary" onclick="generarInforme('cosecha')" style="font-size:11px;padding:8px">📦 Cosecha</button>
+        <button class="btn btn-secondary" onclick="generarInforme('encargados')" style="font-size:11px;padding:8px">👨‍🌾 Por encargado ($)</button>
+        <button class="btn btn-secondary" onclick="generarInforme('ranking')" style="font-size:11px;padding:8px">🏆 Ranking capacidades</button>
         <button class="btn btn-secondary" onclick="generarInforme('ausencias')" style="font-size:11px;padding:8px;grid-column:span 2">🏥 Ausencias, licencias y vacaciones</button>
       </div>
+      <button class="btn btn-primary" onclick="renderInfCharts()" style="margin-top:10px;background:var(--dark)">📊 Ver gráficos del periodo</button>
       <div id="infMsg" style="margin-top:10px;font-size:11px;color:var(--muted)"></div>
     </div>
+    <div id="infCharts"></div>
   </div>
 
   <!-- CONFIG -->
@@ -412,7 +435,10 @@ select:focus,input:focus{border-color:var(--green)}
       <div class="card-title">👤 Trabajadores — <span id="cfgPLbl" style="text-transform:none;font-style:italic;font-weight:400"></span></div>
       <div id="wList"></div>
       <div class="sec-div">Agregar trabajador</div>
-      <div class="form-row"><label>Nombre completo</label><input type="text" id="nN" placeholder="Ej: Juan Pérez"></div>
+      <div class="form-grid">
+        <div><label>Nombres</label><input type="text" id="nN" placeholder="Ej: Juan Pablo"></div>
+        <div><label>Apellidos</label><input type="text" id="nA" placeholder="Ej: Pérez Soto"></div>
+      </div>
       <div class="form-grid">
         <div><label>Código rango</label><input type="text" id="nC" placeholder="9001-9500"></div>
         <div><label>Subjefe</label><select id="nS"></select></div>
@@ -432,16 +458,16 @@ select:focus,input:focus{border-color:var(--green)}
         <div class="form-row"><label>Contraseña inicial</label><input type="password" id="nuPass" placeholder="mínimo 6 caracteres"></div>
         <div class="form-grid">
           <div><label>Rol</label>
-            <select id="nuRole">
+            <select id="nuRole" onchange="if(this.value==='admin')document.getElementById('nuPredio').value='todos'">
               <option value="subjefe">Subjefe</option>
               <option value="admin">Admin / Gerencia</option>
             </select>
           </div>
-          <div><label>Predio</label>
+          <div><label>Predio / Zona</label>
             <select id="nuPredio">
-              <option value="transito">El Tránsito</option>
-              <option value="constancia">La Constancia</option>
-              <option value="paradero">Paradero 12</option>
+              <option value="z1">Zona 1 La Viña</option>
+              <option value="z2">Zona 2</option>
+              <option value="z3">Zona 3</option>
               <option value="todos">Todos (admin)</option>
             </select>
           </div>
@@ -453,6 +479,16 @@ select:focus,input:focus{border-color:var(--green)}
         </div>
         <button class="btn btn-primary" onclick="createUser()">Crear usuario</button>
       </div>
+    </div>
+    <!-- costo jornada hombre (solo admin) -->
+    <div class="card" id="costCard" style="display:none">
+      <div class="card-title">💰 Costo jornada hombre</div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">Se usa en los informes para calcular el costo de las labores: costo = horas ÷ horas por jornada × costo jornada.</p>
+      <div class="form-grid">
+        <div><label>Costo jornada (CLP)</label><input type="number" id="cfgCostoJornada" placeholder="Ej: 25000" min="0"></div>
+        <div><label>Horas por jornada</label><input type="number" id="cfgHorasJornada" placeholder="8" min="1" step="0.5"></div>
+      </div>
+      <button class="btn btn-primary" onclick="saveCfgCosto()">Guardar parámetros</button>
     </div>
     <div class="card">
       <div class="card-title">⚠️ Datos</div>
@@ -486,7 +522,69 @@ const DIAS=['Lunes','Martes','Miérc.','Jueves','Viernes'];
 const TNAMES={otono:'Otoño',invierno:'Invierno',primor:'Primor',trastomate:'Trastomate',verano:'Verano'};
 const TICONS={otono:'🍂',invierno:'❄️',primor:'🌱',trastomate:'🔄',verano:'☀️'};
 const TORDER=['otono','invierno','primor','trastomate','verano'];
+// Lista oficial 2025 (versión 2 — "Labores de cultivo listado 2025.xlsx")
 const LABORES=[
+  {id:1,d:"Tumbar plantas"},
+  {id:2,d:"Definir los ejes definitivos de la planta (2-3)"},
+  {id:3,d:"Amarra"},
+  {id:4,d:"Desbrote"},
+  {id:5,d:"Envoltura"},
+  {id:6,d:"Envoltura y desbrote"},
+  {id:7,d:"Deshoje basal (dejando 1 a 3 hojas bajo el primer racimo)"},
+  {id:8,d:"Arreglo de racimo (definir la cantidad de los mejores cinco frutos por racimo)"},
+  {id:9,d:"Dejar una hoja bajo el segundo racimo (deshoje total bajo eso)"},
+  {id:10,d:"Deshoje bajo el tercer racimo (verano)"},
+  {id:11,d:"Despeje de primer racimo"},
+  {id:12,d:"Despeje de segundo racimo"},
+  {id:13,d:"Despeje de tercer racimo"},
+  {id:14,d:"Despeje de cuarto racimo"},
+  {id:15,d:"Despeje de quinto racimo"},
+  {id:16,d:"Despeje de sexto racimo"},
+  {id:17,d:"Despeje de séptimo racimo"},
+  {id:18,d:"Despunte final (de acuerdo a la cantidad de racimos de la temporada)"},
+  {id:19,d:"Cosecha de acuerdo a color exigido"},
+  {id:20,d:"Limpieza de tejido muerto, cazado, botrytis"},
+  {id:21,d:"Limpieza de pasillo (malezas)"},
+  {id:22,d:"Ventilación"},
+  {id:23,d:"Vibrado al alambre"},
+  {id:24,d:"Aplicación de hormona en flores"},
+  {id:25,d:"Colocar hilo blanco extra"},
+  {id:26,d:"Aplicar chip de quillay en preparación de mesa de plantación"},
+  {id:27,d:"Aplicación de fertilizantes en mesa de plantación (base)"},
+  {id:28,d:"Asperjar manualmente ácido peracético a hojas con botrytis"},
+  {id:29,d:"Cortar plantas en cuello"},
+  {id:30,d:"Descolgar la planta"},
+  {id:31,d:"Sacar las plantas a pasillo central"},
+  {id:32,d:"Remoción de residuo de cultivo terminado (frutos, restos de plantas, plásticos, tablas)"},
+  {id:33,d:"Sacar el acolchado"},
+  {id:34,d:"Levantar las cintas de riego, que se dejan amarradas a lo largo del invernadero"},
+  {id:35,d:"Levantar cabezales de conducción de riego"},
+  {id:36,d:"Levantar el tutor que soporta la vara en naves de cercha (El Tránsito y P12)"},
+  {id:37,d:"Limpieza tras rastraje"},
+  {id:38,d:"Limpieza tras escarificador"},
+  {id:39,d:"Pasado de encamador"},
+  {id:40,d:"Pasada de rovotator, armar la mesa y encabezado de mesa"},
+  {id:41,d:"Apoyo a la fumigación y colocando acolchado y cinta de riego"},
+  {id:42,d:"Bajar cabezales de conducción de riego"},
+  {id:43,d:"Conexión de cintas de riego a conectores"},
+  {id:44,d:"Marcaje sobre el acolchado"},
+  {id:45,d:"Perforado de acolchado, con PVC de 63"},
+  {id:46,d:"Sacar el círculo de polietileno del perforado"},
+  {id:47,d:"Colocar cinta de riego al centro de la mesa (5-10 cm entre ellas)"},
+  {id:48,d:"Aplicación de desinfección ambiental"},
+  {id:49,d:"Riego de preplantación"},
+  {id:50,d:"Instalación de cintas de riego de pasillo"},
+  {id:51,d:"Hacer hoyos de plantación con un molde de madera"},
+  {id:52,d:"Establecimiento de cultivo (reparten las plantas y hacen la plantación)"},
+  {id:53,d:"Ordenar alambre a 60 cm entre ellos"},
+  {id:54,d:"Raspar pasillo"},
+  {id:55,d:"Emparejar pasillos"},
+  {id:56,d:"Colocar el tutor que soporta la vara en naves de cercha (El Tránsito y P12)"},
+  {id:57,d:"En naves altas amarrar hilo al alambre de conducción y hacer argolla"},
+  {id:58,d:"Abrir cintas entre 30 y 40 cm entre ellas"}
+];
+// Lista antigua (versión 1) — solo para mostrar registros históricos guardados antes del cambio
+const LABORES_V1=[
   {id:1,d:"Cortar plantas en cuello"},{id:2,d:"Descolgar la planta"},{id:3,d:"Sacar plantas a pasillo central"},
   {id:4,d:"Remoción de residuo de cultivo"},{id:5,d:"Sacar el acolchado"},{id:6,d:"Levantar cintas de riego"},
   {id:7,d:"Levantar cabezales conducción riego"},{id:8,d:"Levantar tutor de vara (cercha)"},
@@ -513,6 +611,35 @@ const LABORES=[
   {id:56,d:"Deshoje bajo 3° racimo (verano)"},{id:57,d:"Chip de quillay en mesa plantación"},
   {id:58,d:"Fertilizantes en mesa (base)"},{id:59,d:"Asperjar ácido peracético (botrytis)"},{id:60,d:"Recoger tomates del pasillo"},{id:61,d:"Desbrote"},{id:62,d:"Permiso"},{id:63,d:"Limpieza de pasillo (hojas podadas)"}
 ];
+// Mapeo id antiguo → id nuevo (null = sin equivalente en la lista nueva)
+const V1_TO_V2={1:29,2:30,3:31,4:32,5:33,6:34,7:35,8:36,9:37,10:38,11:39,12:40,13:41,14:42,15:43,16:44,17:45,18:46,19:47,20:48,21:49,22:50,23:51,24:52,25:null,26:53,27:54,28:55,29:56,30:57,31:58,32:1,33:2,34:3,35:4,36:6,37:7,38:6,39:11,40:12,41:13,42:14,43:15,44:16,45:17,46:8,47:18,48:19,49:20,50:21,51:22,52:23,53:24,54:25,55:9,56:10,57:26,58:27,59:28,60:null,61:4,62:null,63:null};
+const LABOR_V=2;                 // versión vigente de la lista
+const ID_COSECHA=19;             // "Cosecha de acuerdo a color exigido" en lista v2
+// Helpers de compatibilidad: registros/programaciones antiguas no tienen campo lv
+function recLV(r){return (r&&r.lv)||1}
+function laborInfo(id,lv){const list=(lv||1)>=2?LABORES:LABORES_V1;return list.find(l=>l.id===id)}
+function laborLabel(id,lv){const l=laborInfo(id,lv);return l?l.d:'—'}
+// Id normalizado a la lista v2 (para agrupar/comparar entre versiones). 'v1_x' = sin equivalente
+function normLaborId(id,lv){if((lv||1)>=2)return id;const m=V1_TO_V2[id];return (m===null||m===undefined)?'v1_'+id:m}
+
+// ── Nombres de trabajadores: se muestran "Apellidos, Nombres" y en orden alfabético ──
+// Si el trabajador tiene campos nombres/apellidos se usan; si no (datos antiguos con
+// solo "nombre"), se estima: 2 palabras = nombre+apellido, 3 = nombre+2 apellidos,
+// 4+ = 2 nombres + resto apellidos. Se puede corregir con el botón ✏️ en Config.
+function wSplit(w){
+  if(w.nombres||w.apellidos)return{nombres:w.nombres||'',apellidos:w.apellidos||''};
+  const parts=(w.nombre||'').trim().split(/\s+/).filter(Boolean);
+  if(parts.length<=1)return{nombres:parts[0]||'',apellidos:''};
+  if(parts.length===2)return{nombres:parts[0],apellidos:parts[1]};
+  if(parts.length===3)return{nombres:parts[0],apellidos:parts.slice(1).join(' ')};
+  return{nombres:parts.slice(0,2).join(' '),apellidos:parts.slice(2).join(' ')};
+}
+function wDisplay(w){
+  const s=wSplit(w);
+  if(!s.apellidos)return s.nombres||w.nombre||'';
+  return s.apellidos+', '+s.nombres;
+}
+function sortWs(list){return (list||[]).slice().sort((a,b)=>wDisplay(a).localeCompare(wDisplay(b),'es',{sensitivity:'base'}))}
 
 // ══════════════════════════════════════════════
 // FIREBASE INIT
@@ -546,9 +673,10 @@ let progWeekOffset = 0;
 // In-memory caches (refreshed on predio change / live listeners)
 let wMap       = {z1:[],z2:[],z3:[]};
 let rCache     = [];   // registros of active predio
-let ciclosCache= {};   // {subjefe: [cycles]}
+let ciclosCache= {};   // {'predioId|subjefe': [cycles]} — con clave por predio para que el admin vea las 3 zonas
 let progCache  = {};   // {mondayIso: progDoc}
 let usersCache = [];   // all system users
+let cfgGlobal  = {costoJornada:0,horasJornada:8};   // /arr_config/global — parámetros de costo
 
 // Listeners to unsubscribe on predio change
 let unsubRegistros = null;
@@ -649,9 +777,36 @@ function bootApp(){
   // Restrict predio tabs for subjefes
   applyRoleUI();
 
+  // Load global config (costo jornada) — no bloquea el arranque
+  loadCfgGlobal();
+
   // Load data for default predio
   const startPredio = isAdmin()?'z1':(currentProfile.predioId||'z1');
   selPredio(startPredio);
+}
+
+async function loadCfgGlobal(){
+  try{
+    const s=await db.collection('arr_config').doc('global').get();
+    if(s.exists)cfgGlobal={...cfgGlobal,...s.data()};
+    const ci=document.getElementById('cfgCostoJornada'),hi=document.getElementById('cfgHorasJornada');
+    if(ci&&!ci.value&&cfgGlobal.costoJornada)ci.value=cfgGlobal.costoJornada;
+    if(hi&&!hi.value)hi.value=cfgGlobal.horasJornada;
+  }catch(e){console.error('cfg',e)}
+}
+
+async function saveCfgCosto(){
+  if(!isAdmin()){toast('Solo admin puede cambiar los parámetros');return}
+  const costo=parseFloat(document.getElementById('cfgCostoJornada').value)||0;
+  const horas=parseFloat(document.getElementById('cfgHorasJornada').value)||8;
+  if(horas<=0){toast('⚠️ Horas por jornada debe ser mayor a 0');return}
+  loading(true,'Guardando…');
+  try{
+    await db.collection('arr_config').doc('global').set({costoJornada:costo,horasJornada:horas},{merge:true});
+    cfgGlobal={...cfgGlobal,costoJornada:costo,horasJornada:horas};
+    toast('✅ Parámetros guardados');
+  }catch(e){toast('Error: '+e.message)}
+  loading(false);
 }
 
 function applyRoleUI(){
@@ -663,6 +818,7 @@ function applyRoleUI(){
   });
   // Config: show users section only for admin
   document.getElementById('usersAdminSection').style.display=isAdmin()?'block':'none';
+  document.getElementById('costCard').style.display=isAdmin()?'block':'none';
   document.getElementById('clearDataBtn').style.display=isAdmin()?'block':'none';
   // Add worker button: only admin
   document.getElementById('addWBtn').style.display=isAdmin()?'block':'none';
@@ -706,16 +862,23 @@ async function loadPredioData(pid){
         if(document.getElementById('screen-prog').classList.contains('active')){populateProgSubjefe();renderProg();}
       });
 
-    // Live listener for ciclos per subjefe
+    // Live listener for ciclos per subjefe.
+    // El admin ve/gestiona ciclos de LAS 3 ZONAS desde la pantalla Ciclos, así que
+    // hay que suscribirse a todas (antes solo se escuchaba la zona activa y los
+    // ciclos creados para otras zonas no aparecían en pantalla).
     ciclosCache={};
-    for(const sub of pD().subjefes){
-      unsubCiclos[sub]=colCiclos(pid,sub)
-        .orderBy('inicio','asc')
-        .onSnapshot(snap=>{
-          ciclosCache[sub]=snap.docs.map(d=>({id:d.id,...d.data()}));
-          renderCtx();
-          if(document.getElementById('screen-ciclos').classList.contains('active'))renderCiclos();
-        });
+    const predsToWatch=isAdmin()?PRED_ORDER:[pid];
+    for(const cpid of predsToWatch){
+      for(const sub of PREDIOS[cpid].subjefes){
+        const key=cpid+'|'+sub;
+        unsubCiclos[key]=colCiclos(cpid,sub)
+          .orderBy('inicio','asc')
+          .onSnapshot(snap=>{
+            ciclosCache[key]=snap.docs.map(d=>({id:d.id,...d.data()}));
+            renderCtx();
+            if(document.getElementById('screen-ciclos').classList.contains('active'))renderCiclos();
+          });
+      }
     }
 
     loading(false);
@@ -731,12 +894,21 @@ async function loadPredioData(pid){
 // ══════════════════════════════════════════════
 // CICLO HELPERS
 // ══════════════════════════════════════════════
-function getCicloEn(predioId,subjefe,fecha=todayIso){
-  const cs=ciclosCache[subjefe]||[];
-  return cs.find(c=>c.inicio<=fecha&&(c.fin===null||c.fin>=fecha))||null;
+function cyclesOf(predioId,subjefe){return ciclosCache[predioId+'|'+subjefe]||[]}
+// Puede haber MÁS DE UN ciclo vigente a la vez (ej: verano + trastomate, primor + invierno)
+function getCiclosEn(predioId,subjefe,fecha=todayIso){
+  return cyclesOf(predioId,subjefe).filter(c=>c.inicio<=fecha&&(c.fin===null||c.fin>=fecha));
 }
-function getCicloAbierto(predioId,subjefe){
-  return (ciclosCache[subjefe]||[]).find(c=>c.fin===null)||null;
+function getCicloEn(predioId,subjefe,fecha=todayIso){
+  return getCiclosEn(predioId,subjefe,fecha)[0]||null;
+}
+function getCicloAbiertoTemporada(predioId,subjefe,temporada){
+  return cyclesOf(predioId,subjefe).find(c=>c.fin===null&&c.temporada===temporada)||null;
+}
+function cicloBadges(predioId,subjefe,fecha=todayIso,fontSize='10px',pad='2px 8px'){
+  const cs=getCiclosEn(predioId,subjefe,fecha);
+  if(!cs.length)return `<span class="tbadge tb-none" style="font-size:${fontSize};padding:${pad}">Sin ciclo</span>`;
+  return cs.map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:${fontSize};padding:${pad}">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${c.fin===null?' ●':''}</span>`).join('');
 }
 
 // ══════════════════════════════════════════════
@@ -745,12 +917,8 @@ function getCicloAbierto(predioId,subjefe){
 function ctxHTML(){
   const p=pD(),pc={z1:'z1',z2:'z2',z3:'z3'}[activePred];
   const rows=p.subjefes.map(s=>{
-    const c=getCicloEn(activePred,s,selDate);
-    const badge=c
-      ?`<span class="tbadge tb-${c.temporada}" style="font-size:10px;padding:2px 8px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${c.fin===null?' ●':''}</span>`
-      :`<span class="tbadge tb-none" style="font-size:10px;padding:2px 8px">Sin ciclo</span>`;
     return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-top:5px">
-      <span class="stag">👤 ${s}</span>${badge}
+      <span class="stag">👤 ${s}</span>${cicloBadges(activePred,s,selDate)}
     </div>`;
   }).join('');
   return `<div class="ctx-pill">
@@ -787,19 +955,38 @@ function filtW(){
   const sub=document.getElementById('selSub').value||(isAdmin()?'':userSubjefe());
   const sel=document.getElementById('selW');const cur=sel.value;
   // Arrayanes uses pool workers - always show all, ignore subjefe filter
-  const list=pWs();
-  sel.innerHTML=`<option value="">— Seleccionar —</option>`+list.map(w=>`<option value="${w.id}">${w.nombre}</option>`).join('');
+  const list=sortWs(pWs());
+  sel.innerHTML=`<option value="">— Seleccionar —</option>`+list.map(w=>`<option value="${w.id}">${wDisplay(w)}</option>`).join('');
   sel.value=cur;
   // populate reemplazo with ALL workers from ALL predios + Otro
   const selR=document.getElementById('selReemplazo');
   if(selR){
     selR.innerHTML=`<option value="">— Seleccionar reemplazante —</option>`+
       Object.entries(wMap).flatMap(([pid,ws])=>
-        ws.filter(w=>w.id!==cur).map(w=>`<option value="${pid}|${w.id}">${w.nombre} (${PREDIOS[pid].nombre})</option>`)
+        sortWs(ws).filter(w=>w.id!==cur).map(w=>`<option value="${pid}|${w.id}">${wDisplay(w)} (${PREDIOS[pid].nombre})</option>`)
       ).join('')+
       `<option value="otro|otro">Otro (externo)</option>`+
       `<option value="sin|sin">Sin reemplazo disponible</option>`;
   }
+}
+
+// ── Tipos de ausencia ──
+const TIPO_AUS={
+  sin:        {t:'Sin justificación legal',icon:'⚠️',bg:'#FEE2E2',col:'var(--red)', border:'var(--red)', usaJornada:true, usaPeriodo:false},
+  justificada:{t:'Justificada',            icon:'📄',bg:'#E0F2FE',col:'#0369A1',    border:'#0EA5E9',    usaJornada:true, usaPeriodo:false},
+  licencia:   {t:'Licencia médica',        icon:'🏥',bg:'#EDE9FE',col:'#7C3AED',    border:'#7C3AED',    usaJornada:false,usaPeriodo:true},
+  vacaciones: {t:'Vacaciones',             icon:'🌴',bg:'#FEF3C7',col:'#B45309',    border:'#F59E0B',    usaJornada:false,usaPeriodo:true},
+  retiro:     {t:'Retiro',                 icon:'🚪',bg:'#FFE4E6',col:'#9F1239',    border:'#9F1239',    usaJornada:true, usaPeriodo:false}
+};
+// Registros antiguos no tienen tipoAusencia: se deriva de los booleanos licencia/vacaciones
+function tipoAusenciaDe(r){return r.tipoAusencia||(r.vacaciones?'vacaciones':r.licencia?'licencia':'sin')}
+function jornadaTxt(r){
+  const am=r.ausAM,pm=r.ausPM;
+  if(am===undefined&&pm===undefined)return 'Día completo';
+  if(am&&pm)return 'Día completo';
+  if(am)return 'Solo AM';
+  if(pm)return 'Solo PM';
+  return 'Día completo';
 }
 
 function checkAusente(){
@@ -807,19 +994,40 @@ function checkAusente(){
   document.getElementById('ausenteSection').style.display=wId?'block':'none';
   if(!wId){
     document.getElementById('chkAusente').checked=false;
-    const r=document.querySelector('input[name="tipoAusencia"][value="sin"]');if(r)r.checked=true;
+    resetAusenciaUI();
     document.getElementById('tipoAusenciaDiv').style.display='none';
   }
   filtW();
 }
 
+function resetAusenciaUI(){
+  const r=document.querySelector('input[name="tipoAusencia"][value="sin"]');if(r)r.checked=true;
+  const am=document.getElementById('chkAusAM'),pm=document.getElementById('chkAusPM');
+  if(am)am.checked=true;if(pm)pm.checked=true;
+  const ini=document.getElementById('ausIni'),fin=document.getElementById('ausFin');
+  if(ini)ini.value='';if(fin)fin.value='';
+  const sel=document.getElementById('selReemplazo');if(sel)sel.value='';
+  onTipoAusencia();
+}
+
+function onTipoAusencia(){
+  const sel=document.querySelector('input[name="tipoAusencia"]:checked');
+  const tipo=sel?sel.value:'sin';
+  const cfg=TIPO_AUS[tipo]||TIPO_AUS.sin;
+  document.getElementById('ausJornadaDiv').style.display=cfg.usaJornada?'block':'none';
+  document.getElementById('ausPeriodoDiv').style.display=cfg.usaPeriodo?'block':'none';
+  if(cfg.usaPeriodo){
+    const ini=document.getElementById('ausIni'),fin=document.getElementById('ausFin');
+    if(ini&&!ini.value)ini.value=selDate;
+    if(fin&&!fin.value)fin.value=selDate;
+  }
+}
+
 function onChkAusente(){
   const c=document.getElementById('chkAusente').checked;
   document.getElementById('tipoAusenciaDiv').style.display=c?'block':'none';
-  if(!c){
-    const r=document.querySelector('input[name="tipoAusencia"][value="sin"]');if(r)r.checked=true;
-    const sel=document.getElementById('selReemplazo');if(sel)sel.value='';
-  }
+  if(c){onTipoAusencia();}
+  else{resetAusenciaUI();}
 }
 
 function toggleReemplazo(){
@@ -845,6 +1053,10 @@ function addLaborRow(){
       <div><label>Horas</label><input type="number" class="lr-horas" placeholder="7.5" min="0" max="14" step="0.5"></div>
       <div><label>N° mesas</label><input type="number" class="lr-mesas" placeholder="32" min="0"></div>
     </div>
+    <div class="labor-nums" style="margin-top:7px">
+      <div><label>Postura</label><select class="lr-postura" style="background:var(--white)"><option value="">—</option><option value="1">Postura 1</option><option value="2">Postura 2</option><option value="3">Postura 3</option></select></div>
+      <div><label>Evaluación</label><select class="lr-eval" style="background:var(--white)"><option value="">—</option><option value="1">1 · Muy bien</option><option value="2">2 · Bien</option><option value="3">3 · Mal</option></select></div>
+    </div>
     <div class="lr-cajas-row" style="display:none;margin-top:7px">
       <div><label>N° cajas cosechadas</label><input type="number" class="lr-cajas" placeholder="Ej: 45" min="0"></div>
     </div>`;
@@ -853,7 +1065,7 @@ function addLaborRow(){
 function checkCosecha(sel){
   const row=sel.closest('.labor-row');
   const cajasRow=row.querySelector('.lr-cajas-row');
-  if(cajasRow)cajasRow.style.display=parseInt(sel.value)===48?'block':'none';
+  if(cajasRow)cajasRow.style.display=parseInt(sel.value)===ID_COSECHA?'block':'none';
 }
 
 // Cuando tipean un código, auto-seleccionar en el dropdown
@@ -940,7 +1152,7 @@ function renderHoy(){
 function eHTML(e,pred=activePred){
   const w=pWs().find(x=>x.id===e.workerId);
   const pc={z1:'z1',z2:'z2',z3:'z3'}[pred];
-  const ciclo=w?getCicloEn(pred,w.subjefe,e.fecha):null;
+  const ciclosE=w?getCiclosEn(pred,w.subjefe,e.fecha):[];
   const labores=e.labores||[{laborId:e.laborId,horas:e.horas||0,mesas:e.mesas||0}];
   const totalH=labores.reduce((s,l)=>s+(l.horas||0),0);
   const totalM=labores.reduce((s,l)=>s+(l.mesas||0),0);
@@ -950,36 +1162,42 @@ function eHTML(e,pred=activePred){
   if(e.ausente){
     const esOtro=e.reemplazoWorkerId==='otro';
     const rw=(!esOtro&&e.reemplazoWorkerId&&e.reemplazoWorkerId!=='sin')?(wMap[e.reemplazoPredioId]||[]).find(x=>x.id===e.reemplazoWorkerId):null;
-    let bg='#FEE2E2',col='var(--red)',icon='⚠️ Sin justificación';
-    if(e.vacaciones){bg='#FEF3C7';col='#B45309';icon='🌴 Vacaciones';}
-    else if(e.licencia){bg='#EDE9FE';col='#7C3AED';icon='🏥 Licencia médica';}
+    const tAus=tipoAusenciaDe(e);
+    const cfg=TIPO_AUS[tAus]||TIPO_AUS.sin;
+    const bg=cfg.bg,col=cfg.col;
+    let icon=cfg.icon+' '+cfg.t;
+    if(cfg.usaPeriodo&&e.ausInicio&&e.ausFin){icon+=` (${fDMY(e.ausInicio)} → ${fDMY(e.ausFin)})`;}
+    else if(cfg.usaJornada){icon+=` · ${jornadaTxt(e)}`;}
     let reempTxt='';
     if(e.reemplazoWorkerId==='sin'){reempTxt=`<span style="color:var(--text)">· Sin reemplazo disponible</span>`;}
     else if(esOtro){reempTxt=`<span style="color:var(--text)">· Reemplazado por <strong>Otro (externo)</strong></span>`;}
-    else if(rw){reempTxt=`<span style="color:var(--text)">· Reemplazado por <strong>${rw.nombre}</strong>${e.reemplazoPredioId!==pred?` (${PREDIOS[e.reemplazoPredioId].nombre})`:''}</span>`;}
+    else if(rw){reempTxt=`<span style="color:var(--text)">· Reemplazado por <strong>${wDisplay(rw)}</strong>${e.reemplazoPredioId!==pred?` (${PREDIOS[e.reemplazoPredioId].nombre})`:''}</span>`;}
     reemplazoHTML=`<div style="background:${bg};border-radius:7px;padding:5px 9px;margin-top:5px;font-size:11px;color:${col};display:flex;align-items:center;gap:5px">
       <span>${icon}</span>${reempTxt}
     </div>`;
   }
 
   const laborLines=labores.map((lr,i)=>{
-    const l=LABORES.find(x=>x.id===lr.laborId);
+    const elv=recLV(e);
+    const l=laborInfo(lr.laborId,elv);
     return `<div style="display:flex;align-items:flex-start;gap:6px;padding:5px 0;${i>0?'border-top:1px solid var(--sand)':''}">
       <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);min-width:18px;margin-top:1px">${i+1}.</span>
       <div style="flex:1">
-        <div style="font-size:12px;font-weight:600;line-height:1.3">${l?`<span style="color:var(--muted);font-family:'DM Mono',monospace">${lr.laborId}.</span> ${l.d}`:'—'}</div>
-        <div style="display:flex;gap:5px;margin-top:3px">
+        <div style="font-size:12px;font-weight:600;line-height:1.3">${l?`<span style="color:var(--muted);font-family:'DM Mono',monospace">${lr.laborId}.${elv<2?'ᵃⁿᵗ':''}</span> ${l.d}`:'—'}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:3px">
           ${lr.horas?`<span class="badge bh">⏱ ${lr.horas}h</span>`:''}
           ${lr.mesas?`<span class="badge bm">🪴 ${lr.mesas} mesas</span>`:''}
           ${lr.cajas?`<span class="badge" style="background:#FEE2E2;color:#9F1239">📦 ${lr.cajas} cajas</span>`:''}
+          ${lr.postura?`<span class="badge" style="background:#EDE9FE;color:#5B21B6">📍 Postura ${lr.postura}</span>`:''}
+          ${lr.eval?`<span class="badge" style="${lr.eval===1?'background:#DCFCE7;color:#166534':lr.eval===2?'background:#FEF3C7;color:#92400E':'background:#FEE2E2;color:#9F1239'}">★ ${lr.eval===1?'Muy bien':lr.eval===2?'Bien':'Mal'}</span>`:''}
         </div>
       </div>
     </div>`;
   }).join('');
-  return `<div class="ecard" style="border-left-color:var(--c-${pc})${e.ausente?(e.vacaciones?';border-left-color:#F59E0B':e.licencia?';border-left-color:#7C3AED':';border-left-color:var(--red)'):''}">
+  return `<div class="ecard" style="border-left-color:var(--c-${pc})${e.ausente?';border-left-color:'+((TIPO_AUS[tipoAusenciaDe(e)]||TIPO_AUS.sin).border):''}">
     <div class="ehdr">
       <div>
-        <div class="ename" style="${e.ausente?'color:var(--muted);text-decoration:line-through':''}">${w?w.nombre:'—'}</div>
+        <div class="ename" style="${e.ausente?'color:var(--muted);text-decoration:line-through':''}">${w?wDisplay(w):'—'}</div>
         <div class="emeta">${w?`👤 ${w.subjefe} · `:''}${fD(e.fecha)}</div>
       </div>
       ${canDel?`<button class="del-btn" onclick="delEntry('${e.id}')">✕</button>`:''}
@@ -987,7 +1205,7 @@ function eHTML(e,pred=activePred){
     ${reemplazoHTML}
     <div class="badges" style="margin:7px 0">
       <span class="badge b${pc}">${PREDIOS[pred].nombre}</span>
-      ${ciclo?`<span class="tbadge tb-${ciclo.temporada}" style="font-size:9px;padding:2px 7px">${TICONS[ciclo.temporada]} ${TNAMES[ciclo.temporada]}</span>`:''}
+      ${ciclosE.map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:9px;padding:2px 7px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}</span>`).join('')}
       ${labores.length>1?`<span class="badge" style="background:var(--sand);color:var(--dark)">${labores.length} labores</span>`:''}
       ${totalH?`<span class="badge bh">⏱ ${totalH}h total</span>`:''}
       ${totalM?`<span class="badge bm">🪴 ${totalM} mesas</span>`:''}
@@ -1008,8 +1226,24 @@ async function guardar(){
   if(!wId){toast('⚠️ Selecciona un trabajador');return}
   const tipoSel=document.querySelector('input[name="tipoAusencia"]:checked');
   const tipo=ausente?(tipoSel?tipoSel.value:'sin'):null;
+  const cfgAus=tipo?(TIPO_AUS[tipo]||TIPO_AUS.sin):null;
   const licencia=tipo==='licencia';
   const vacaciones=tipo==='vacaciones';
+  // Jornada AM/PM (sin justificación, justificada, retiro)
+  let ausAM=null,ausPM=null;
+  if(ausente&&cfgAus.usaJornada){
+    ausAM=document.getElementById('chkAusAM').checked;
+    ausPM=document.getElementById('chkAusPM').checked;
+    if(!ausAM&&!ausPM){toast('⚠️ Marca AM, PM o ambos');return}
+  }
+  // Periodo (licencia médica, vacaciones)
+  let ausInicio=null,ausFin=null;
+  if(ausente&&cfgAus.usaPeriodo){
+    ausInicio=document.getElementById('ausIni').value;
+    ausFin=document.getElementById('ausFin').value;
+    if(!ausInicio||!ausFin){toast('⚠️ Indica inicio y término del periodo');return}
+    if(ausFin<ausInicio){toast('⚠️ El término debe ser igual o posterior al inicio');return}
+  }
   const rows=document.querySelectorAll('#laborRows .labor-row');
   const labores=[];let hasError=false;
   rows.forEach(row=>{
@@ -1020,7 +1254,9 @@ async function guardar(){
     row.querySelector('.lr-labor').style.borderColor='';
     const cajasInput=row.querySelector('.lr-cajas');
     const cajas=cajasInput?parseInt(cajasInput.value)||0:0;
-    labores.push({laborId:lId,horas,mesas,cajas});
+    const postura=parseInt(row.querySelector('.lr-postura').value)||null;
+    const evaluacion=parseInt(row.querySelector('.lr-eval').value)||null;
+    labores.push({laborId:lId,horas,mesas,cajas,postura,eval:evaluacion});
   });
   // Si el trabajador está ausente y no hay reemplazante seleccionado, se omiten labores.
   // Si hay reemplazante, las labores ingresadas corresponden al trabajo realizado por el reemplazante.
@@ -1032,12 +1268,12 @@ async function guardar(){
   loading(true,'Guardando…');
   try{
     await colRegistros(activePred).add({fecha:selDate,workerId:wId,labores,obs,
-      ausente:ausente||false,licencia:licencia||false,vacaciones:vacaciones||false,reemplazoPredioId,reemplazoWorkerId,
-      ts:Date.now(),creadoPor:currentUser.uid});
+      ausente:ausente||false,tipoAusencia:tipo,licencia:licencia||false,vacaciones:vacaciones||false,
+      ausAM,ausPM,ausInicio,ausFin,reemplazoPredioId,reemplazoWorkerId,
+      lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid});
     document.getElementById('iO').value='';
     document.getElementById('chkAusente').checked=false;
-    const rDef=document.querySelector('input[name="tipoAusencia"][value="sin"]');if(rDef)rDef.checked=true;
-    const sel=document.getElementById('selReemplazo');if(sel)sel.value='';
+    resetAusenciaUI();
     document.getElementById('tipoAusenciaDiv').style.display='none';
     document.getElementById('ausenteSection').style.display='none';
     initLaborRows();
@@ -1071,13 +1307,13 @@ function renderAvance(){
   const wd=weekDates();
   let wRegs=rCache.filter(r=>wd.includes(r.fecha));
   const wMesas=e=>(e.labores||[{mesas:e.mesas||0}]).reduce((s,l)=>s+(l.mesas||0),0);
-  const visWs=isAdmin()?pWs():pWs().filter(w=>w.subjefe===userSubjefe());
+  const visWs=sortWs(isAdmin()?pWs():pWs().filter(w=>w.subjefe===userSubjefe()));
   const maxM=Math.max(1,...visWs.map(w=>wd.reduce((s,fd)=>s+wRegs.filter(r=>r.workerId===w.id&&r.fecha===fd).reduce((ss,e)=>ss+wMesas(e),0),0)));
   document.getElementById('avW').innerHTML=visWs.length?visWs.map(w=>{
     const tot=wd.reduce((s,fd)=>s+wRegs.filter(r=>r.workerId===w.id&&r.fecha===fd).reduce((ss,e)=>ss+wMesas(e),0),0);
     return `<div style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <span style="font-size:12px;font-weight:600">${w.nombre.split(' ').slice(0,2).join(' ')}</span>
+        <span style="font-size:12px;font-weight:600">${wDisplay(w)}</span>
         <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${tot} mesas</span>
       </div>
       <div class="avbar"><div class="avfill" style="width:${Math.round(tot/maxM*100)}%"></div></div>
@@ -1100,7 +1336,7 @@ function renderAvance(){
         <td style="text-align:right;padding:6px 3px;font-family:'DM Mono',monospace">${h.toFixed(1)}</td>
         <td style="text-align:right;padding:6px 3px;font-family:'DM Mono',monospace">${m}</td>
       </tr>`;}).join('')}</tbody></table>`;
-  const lc={};todayE.forEach(e=>{const labs=e.labores||[{laborId:e.laborId}];labs.forEach(lr=>{const l=LABORES.find(x=>x.id===lr.laborId);const k=l?`${l.id}. ${l.d}`:`#${lr.laborId}`;lc[k]=(lc[k]||0)+1})});
+  const lc={};todayE.forEach(e=>{if(e.ausente)return;const elv=recLV(e);const labs=e.labores||[{laborId:e.laborId}];labs.forEach(lr=>{const l=laborInfo(lr.laborId,elv);const k=l?`${lr.laborId}${elv<2?' (ant.)':''}. ${l.d}`:`#${lr.laborId}`;lc[k]=(lc[k]||0)+1})});
   const sorted=Object.entries(lc).sort((a,b)=>b[1]-a[1]).slice(0,5);
   document.getElementById('avTop').innerHTML=sorted.length?sorted.map(([k,v])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--sand)"><span style="font-size:12px;max-width:80%">${k}</span><span style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--green)">${v}×</span></div>`).join(''):`<div class="empty"><div style="padding:12px 0">Sin entradas hoy</div></div>`;
 }
@@ -1120,18 +1356,16 @@ function renderCiclos(){
     div.appendChild(pl);
     const subs=isAdmin()?p.subjefes:p.subjefes.filter(s=>s===userSubjefe());
     subs.forEach(sub=>{
-      const cycles=(ciclosCache[sub]||[]).slice().sort((a,b)=>b.inicio.localeCompare(a.inicio));
-      const openCycle=cycles.find(c=>c.fin===null);
+      const cycles=cyclesOf(pid,sub).slice().sort((a,b)=>b.inicio.localeCompare(a.inicio));
       const gb=document.createElement('div');gb.className='group-block';
-      const cycleNow=getCicloEn(pid,sub);
       gb.innerHTML=`<div class="gb-header">
         <div><div class="gb-name">👤 ${sub}</div><div class="gb-wcount">${(wMap[pid]||[]).filter(w=>w.subjefe===sub).length} trabajadores</div></div>
-        ${cycleNow?`<span class="tbadge tb-${cycleNow.temporada}">${TICONS[cycleNow.temporada]} ${TNAMES[cycleNow.temporada]}${cycleNow.fin===null?' ●':''}</span>`:`<span class="tbadge tb-none">Sin ciclo</span>`}
+        <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end">${cicloBadges(pid,sub,todayIso,'11px','3px 9px')}</div>
       </div>`;
       const body=document.createElement('div');body.className='gb-body';
       if(cycles.length){
         cycles.forEach(c=>{
-          const isOpen=c.fin===null,isCurrent=getCicloEn(pid,sub)===c,isFuture=c.inicio>todayIso;
+          const isOpen=c.fin===null,isCurrent=getCiclosEn(pid,sub).includes(c),isFuture=c.inicio>todayIso;
           let sc=isOpen?'is-open':'is-closed';if(isCurrent)sc='is-active';
           const ci=document.createElement('div');ci.className=`cycle-item ${sc}`;
           ci.innerHTML=`<div class="ci-top">
@@ -1153,14 +1387,11 @@ function renderCiclos(){
       } else {
         body.innerHTML=`<p style="font-size:12px;color:var(--muted);padding:4px 0 8px">Sin ciclos registrados.</p>`;
       }
-      if(!openCycle){
-        const ar=document.createElement('div');ar.className='add-cycle-row';
-        ar.innerHTML=`<button class="open-cycle-btn" onclick="modalAbrirCiclo('${pid}','${sub}')">🌱 Abrir nuevo ciclo</button>`;
-        body.appendChild(ar);
-      } else {
-        const ar=document.createElement('div');ar.style.cssText='font-size:11px;color:var(--muted);padding:6px 0';
-        ar.textContent='Cierra el ciclo actual antes de abrir uno nuevo.';body.appendChild(ar);
-      }
+      // Siempre se puede abrir otro ciclo: pueden convivir dos temporadas en paralelo
+      // (ej. verano + trastomate, primor + invierno). Solo se bloquea repetir la MISMA temporada abierta.
+      const ar=document.createElement('div');ar.className='add-cycle-row';
+      ar.innerHTML=`<button class="open-cycle-btn" onclick="modalAbrirCiclo('${pid}','${sub}')">🌱 Abrir nuevo ciclo</button>`;
+      body.appendChild(ar);
       gb.appendChild(body);div.appendChild(gb);
     });
   });
@@ -1181,6 +1412,7 @@ async function guardarApertura(predioId,subjefe){
   const temp=document.getElementById('mTemp').value,ini=document.getElementById('mIni').value,notas=document.getElementById('mNot').value.trim();
   const m2=parseInt(document.getElementById('mM2').value)||0;
   if(!ini){toast('⚠️ Ingresa fecha de inicio');return}
+  if(getCicloAbiertoTemporada(predioId,subjefe,temp)){toast('⚠️ Ya hay un ciclo de '+TNAMES[temp]+' abierto para este subjefe.');return}
   loading(true,'Guardando ciclo…');
   try{
     await colCiclos(predioId,subjefe).add({temporada:temp,inicio:ini,fin:null,notas,superficieM2:m2,creadoPor:currentUser.uid,ts:Date.now()});
@@ -1190,7 +1422,7 @@ async function guardarApertura(predioId,subjefe){
 }
 
 async function modalCerrarCiclo(predioId,subjefe,cicloId){
-  const c=(ciclosCache[subjefe]||[]).find(x=>x.id===cicloId);if(!c)return;
+  const c=cyclesOf(predioId,subjefe).find(x=>x.id===cicloId);if(!c)return;
   document.getElementById('modalContent').innerHTML=`
     <div class="modal-title">🔒 Cerrar ciclo — ${subjefe}</div>
     <div style="margin-bottom:14px"><span class="tbadge tb-${c.temporada}">${TICONS[c.temporada]} ${TNAMES[c.temporada]}</span>
@@ -1203,7 +1435,7 @@ async function modalCerrarCiclo(predioId,subjefe,cicloId){
 async function guardarCierre(predioId,subjefe,cicloId){
   const fin=document.getElementById('mFin').value,nota=document.getElementById('mNot2').value.trim();
   if(!fin){toast('⚠️ Ingresa fecha de cierre');return}
-  const c=(ciclosCache[subjefe]||[]).find(x=>x.id===cicloId);
+  const c=cyclesOf(predioId,subjefe).find(x=>x.id===cicloId);
   loading(true,'Cerrando ciclo…');
   try{
     const upd={fin};if(nota)upd.notas=(c.notas?c.notas+' · ':'')+nota;
@@ -1213,7 +1445,7 @@ async function guardarCierre(predioId,subjefe,cicloId){
   loading(false);
 }
 async function modalEditarCiclo(predioId,subjefe,cicloId){
-  const c=(ciclosCache[subjefe]||[]).find(x=>x.id===cicloId);if(!c)return;
+  const c=cyclesOf(predioId,subjefe).find(x=>x.id===cicloId);if(!c)return;
   document.getElementById('modalContent').innerHTML=`
     <div class="modal-title">✏️ Editar ciclo — ${subjefe}</div>
     <div class="form-row"><label>Temporada</label><select id="mTemp">${TORDER.map(k=>`<option value="${k}"${c.temporada===k?' selected':''}>${TICONS[k]} ${TNAMES[k]}</option>`).join('')}</select></div>
@@ -1316,9 +1548,11 @@ async function renderProg(){
     let realEntries=rCache.filter(r=>r.fecha===dayIso&&pWs().some(w=>w.id===r.workerId&&w.subjefe===subjefe));
     const card=document.createElement('div');card.className='prog-day-card';
     if(isToday)card.style.boxShadow='0 0 0 2px var(--green),0 2px 12px rgba(0,0,0,.10)';
+    const progLV=recLV(prog);
     let tasksHTML=tasks.length?tasks.map((t,i)=>{
-      const l=LABORES.find(x=>x.id===t.laborId);
-      const realMesas=realEntries.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>lr.laborId===t.laborId).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
+      const l=laborInfo(t.laborId,progLV);
+      const tNorm=normLaborId(t.laborId,progLV);
+      const realMesas=realEntries.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>normLaborId(lr.laborId,recLV(e))===tNorm).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
       const pct=t.metaMesas>0?Math.min(100,Math.round(realMesas/t.metaMesas*100)):null;
       const bc=pct===null?'var(--green)':pct>=100?'var(--c-primor)':pct>=60?'#F4A261':'var(--red)';
       return `<div class="prog-task">
@@ -1326,7 +1560,7 @@ async function renderProg(){
         <div class="prog-task-info">
           <div class="prog-task-labor">${l?`<span style="color:var(--muted);font-family:'DM Mono',monospace">${t.laborId}.</span> ${l.d}`:'—'}</div>
           <div class="prog-task-meta">
-            <span class="prog-tag ptag-mod">📦 Módulo ${t.modulo||'—'}</span>
+            <span class="prog-tag ptag-mod">📍 ${t.postura?'Postura '+t.postura:(t.modulo?'Módulo '+t.modulo:'—')}</span>
             ${t.metaMesas?`<span class="prog-tag ptag-meta">🎯 ${t.metaMesas} mesas</span>`:''}
             ${realMesas?`<span class="prog-tag ptag-real">✅ ${realMesas} real</span>`:''}
           </div>
@@ -1358,8 +1592,14 @@ function openModalNuevaProg(subjefe,mondayIso){
   // load existing if any
   colProg(activePred,subjefe).doc(mondayIso).get().then(snap=>{
     if(snap.exists){
-      const data=snap.data();
-      progDays.forEach(iso=>{window._progEdit.dias[iso]=(data.dias||{})[iso]||[];});
+      const data=snap.data();const plv=recLV(data);
+      progDays.forEach(iso=>{
+        window._progEdit.dias[iso]=((data.dias||{})[iso]||[]).map(t=>{
+          if(plv>=2)return t;
+          const nid=normLaborId(t.laborId,plv);
+          return {...t,laborId:(typeof nid==='number')?nid:null};
+        });
+      });
       renderProgModalDias(progDays,dayNames);
     }
   });
@@ -1383,20 +1623,20 @@ function progTaskFormHTML(dayIso,ti,t={}){
     <div class="ptask-form-hdr"><span class="ptask-form-num">Tarea ${ti+1}</span><button class="del-btn" onclick="rmProgTask('${dayIso}',${ti})">✕</button></div>
     <div class="form-row"><label>Labor</label><select onchange="updPT('${dayIso}',${ti},'laborId',parseInt(this.value))"><option value="">— Seleccionar —</option>${LABORES.map(l=>`<option value="${l.id}"${t.laborId===l.id?' selected':''}>${l.id}. ${l.d}</option>`).join('')}</select></div>
     <div class="form-grid">
-      <div><label>Módulo</label><input type="text" placeholder="MOD 7" value="${t.modulo||''}" onchange="updPT('${dayIso}',${ti},'modulo',this.value)"></div>
+      <div><label>Postura</label><select onchange="updPT('${dayIso}',${ti},'postura',parseInt(this.value)||null)"><option value="">—</option>${[1,2,3].map(p=>`<option value="${p}"${t.postura===p?' selected':''}>Postura ${p}</option>`).join('')}</select></div>
       <div><label>Meta mesas</label><input type="number" placeholder="120" min="0" value="${t.metaMesas||''}" onchange="updPT('${dayIso}',${ti},'metaMesas',parseInt(this.value)||0)"></div>
     </div>
     <div><label>Notas</label><input type="text" placeholder="Indicaciones…" value="${t.notas||''}" onchange="updPT('${dayIso}',${ti},'notas',this.value)"></div>
   </div>`;
 }
-function addProgTask(dayIso){if(!window._progEdit.dias[dayIso])window._progEdit.dias[dayIso]=[];window._progEdit.dias[dayIso].push({laborId:null,modulo:'',metaMesas:0,notas:''});const c=document.getElementById(`ptasks-${dayIso}`);if(c)c.innerHTML=window._progEdit.dias[dayIso].map((t,ti)=>progTaskFormHTML(dayIso,ti,t)).join('');}
+function addProgTask(dayIso){if(!window._progEdit.dias[dayIso])window._progEdit.dias[dayIso]=[];window._progEdit.dias[dayIso].push({laborId:null,postura:null,metaMesas:0,notas:''});const c=document.getElementById(`ptasks-${dayIso}`);if(c)c.innerHTML=window._progEdit.dias[dayIso].map((t,ti)=>progTaskFormHTML(dayIso,ti,t)).join('');}
 function rmProgTask(dayIso,ti){window._progEdit.dias[dayIso].splice(ti,1);const c=document.getElementById(`ptasks-${dayIso}`);if(c)c.innerHTML=window._progEdit.dias[dayIso].map((t,i)=>progTaskFormHTML(dayIso,i,t)).join('');}
 function updPT(dayIso,ti,field,value){if(window._progEdit.dias[dayIso][ti])window._progEdit.dias[dayIso][ti][field]=value;}
 async function saveProgModal(){
   const {predioId,subjefe,mondayIso,dias}=window._progEdit;
   loading(true,'Guardando programación…');
   try{
-    await colProg(predioId,subjefe).doc(mondayIso).set({semana:mondayIso,dias,ts:Date.now(),creadoPor:currentUser.uid});
+    await colProg(predioId,subjefe).doc(mondayIso).set({semana:mondayIso,dias,lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid});
     closeModal();renderProg();toast('✅ Programación guardada');
   }catch(e){toast('Error: '+e.message)}
   loading(false);
@@ -1421,17 +1661,25 @@ async function renderConfig(){
         </div>
       </div>
       <div style="padding:9px 14px;background:var(--white)">
-        ${p.subjefes.map(s=>{const c=getCicloEn(pid,s);return`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span class="stag">👤 ${s}</span>${c?`<span class="tbadge tb-${c.temporada}" style="font-size:9px;padding:2px 7px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${c.fin===null?' ●':''}</span>`:''}</div>`;}).join('')}
+        ${p.subjefes.map(s=>`<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px"><span class="stag">👤 ${s}</span>${getCiclosEn(pid,s).map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:9px;padding:2px 7px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${c.fin===null?' ●':''}</span>`).join('')}</div>`).join('')}
       </div>
     </div>`;
   }).join('');
-  // workers
+  // workers (orden alfabético por apellido)
   document.getElementById('wList').innerHTML=(wMap[activePred]||[]).length
-    ?(wMap[activePred]).map(w=>`<div class="wrow">
-        <div><div class="wn">${w.nombre}</div><div class="wm">${w.codigo||'—'} · ${w.subjefe}${w.plantas?` · ${w.plantas}pl`:''}</div></div>
-        ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="delW('${w.id}')">✕</button>`:''}
+    ?sortWs(wMap[activePred]).map(w=>`<div class="wrow">
+        <div><div class="wn">${wDisplay(w)}</div><div class="wm">${w.codigo||'—'} · ${w.subjefe}${w.plantas?` · ${w.plantas}pl`:''}</div></div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          ${isAdmin()?`<button class="btn btn-secondary btn-sm" onclick="modalEditarW('${w.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="delW('${w.id}')">✕</button>`:''}
+        </div>
       </div>`).join('')
     :`<div class="empty"><div style="padding:8px 0;font-size:12px">Sin trabajadores</div></div>`;
+  // costo jornada (admin only)
+  if(isAdmin()){
+    const ci=document.getElementById('cfgCostoJornada'),hi=document.getElementById('cfgHorasJornada');
+    if(ci&&!ci.value&&cfgGlobal.costoJornada)ci.value=cfgGlobal.costoJornada;
+    if(hi&&!hi.value)hi.value=cfgGlobal.horasJornada;
+  }
   // users (admin only)
   if(isAdmin()){
     loadUsers();
@@ -1443,14 +1691,48 @@ async function renderConfig(){
 
 async function addW(){
   if(!isAdmin()){toast('Solo el administrador puede agregar trabajadores');return}
-  const n=document.getElementById('nN').value.trim(),c=document.getElementById('nC').value.trim(),s=document.getElementById('nS').value,p=parseInt(document.getElementById('nP').value)||0;
-  if(!n){toast('⚠️ Ingresa un nombre');return}
+  const nom=document.getElementById('nN').value.trim(),ape=document.getElementById('nA').value.trim();
+  const c=document.getElementById('nC').value.trim(),s=document.getElementById('nS').value,p=parseInt(document.getElementById('nP').value)||0;
+  if(!nom||!ape){toast('⚠️ Ingresa nombres y apellidos');return}
+  const n=(nom+' '+ape).trim();
   loading(true,'Guardando…');
   try{
-    const ref=await colWorkers(activePred).add({nombre:n,codigo:c,subjefe:s,plantas:p});
-    wMap[activePred].push({id:ref.id,nombre:n,codigo:c,subjefe:s,plantas:p});
-    ['nN','nC','nP'].forEach(id=>document.getElementById(id).value='');
+    const ref=await colWorkers(activePred).add({nombre:n,nombres:nom,apellidos:ape,codigo:c,subjefe:s,plantas:p});
+    wMap[activePred].push({id:ref.id,nombre:n,nombres:nom,apellidos:ape,codigo:c,subjefe:s,plantas:p});
+    ['nN','nA','nC','nP'].forEach(id=>document.getElementById(id).value='');
     populateSels();renderConfig();toast('✅ Trabajador agregado');
+  }catch(e){toast('Error: '+e.message)}
+  loading(false);
+}
+
+function modalEditarW(id){
+  const w=(wMap[activePred]||[]).find(x=>x.id===id);if(!w)return;
+  const s=wSplit(w);
+  document.getElementById('modalContent').innerHTML=`
+    <div class="modal-title">✏️ Editar trabajador</div>
+    <div class="form-grid">
+      <div><label>Nombres</label><input type="text" id="ewN" value="${(s.nombres||'').replace(/"/g,'&quot;')}"></div>
+      <div><label>Apellidos</label><input type="text" id="ewA" value="${(s.apellidos||'').replace(/"/g,'&quot;')}"></div>
+    </div>
+    <div class="form-grid">
+      <div><label>Código rango</label><input type="text" id="ewC" value="${(w.codigo||'').replace(/"/g,'&quot;')}"></div>
+      <div><label>Subjefe</label><select id="ewS">${pD().subjefes.map(x=>`<option${w.subjefe===x?' selected':''}>${x}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-row"><label>N° plantas</label><input type="number" id="ewP" min="0" value="${w.plantas||''}"></div>
+    <button class="btn btn-primary" onclick="guardarEdicionW('${id}')">Guardar cambios</button>`;
+  document.getElementById('overlay').classList.add('open');
+}
+async function guardarEdicionW(id){
+  if(!isAdmin()){toast('Solo admin puede editar');return}
+  const nom=document.getElementById('ewN').value.trim(),ape=document.getElementById('ewA').value.trim();
+  const c=document.getElementById('ewC').value.trim(),s=document.getElementById('ewS').value,p=parseInt(document.getElementById('ewP').value)||0;
+  if(!nom||!ape){toast('⚠️ Ingresa nombres y apellidos');return}
+  const upd={nombre:(nom+' '+ape).trim(),nombres:nom,apellidos:ape,codigo:c,subjefe:s,plantas:p};
+  loading(true,'Guardando…');
+  try{
+    await colWorkers(activePred).doc(id).update(upd);
+    const w=(wMap[activePred]||[]).find(x=>x.id===id);if(w)Object.assign(w,upd);
+    closeModal();populateSels();renderConfig();toast('✅ Trabajador actualizado');
   }catch(e){toast('Error: '+e.message)}
   loading(false);
 }
@@ -1549,6 +1831,7 @@ function initInformes(){
   sel.innerHTML='<option value="">— Todos —</option>'+pD().subjefes.map(s=>`<option value="${s}">${s}</option>`).join('');
   if(cur)sel.value=cur;
   document.getElementById('infMsg').textContent='';
+  const ch=document.getElementById('infCharts');if(ch)ch.innerHTML='';
 }
 
 function getInfFiltros(){
@@ -1582,7 +1865,7 @@ async function fetchProgramaciones(f){
           const monday=data.semana;
           const days=Object.keys(data.dias);
           const hasOverlap=days.some(iso=>iso>=f.desde&&iso<=f.hasta);
-          if(hasOverlap)all.push({subjefe:sub,monday,dias:data.dias});
+          if(hasOverlap)all.push({subjefe:sub,monday,dias:data.dias,lv:recLV(data)});
         }
       });
     }catch(e){console.error('Error fetching prog for '+sub,e)}
@@ -1594,19 +1877,28 @@ function buildSheetTrabajadores(regs,ws){
   const map={};
   regs.forEach(r=>{
     const w=ws.find(x=>x.id===r.workerId);if(!w)return;
-    const k=w.id;if(!map[k])map[k]={nombre:w.nombre,subjefe:w.subjefe,dias:new Set(),horas:0,mesas:0,cajas:0,ausencias:0,licencias:0,vacaciones:0};
+    const k=w.id;if(!map[k])map[k]={nombre:wDisplay(w),subjefe:w.subjefe,dias:new Set(),horas:0,mesas:0,cajas:0,ausencias:0,justificadas:0,licencias:0,vacaciones:0,retiros:0};
     map[k].dias.add(r.fecha);
     if(r.ausente){
-      if(r.vacaciones)map[k].vacaciones++;
-      else if(r.licencia)map[k].licencias++;
-      else map[k].ausencias++;
+      const t=tipoAusenciaDe(r);
+      let dias=1;
+      if((t==='licencia'||t==='vacaciones')&&r.ausInicio&&r.ausFin){
+        dias=Math.round((new Date(r.ausFin+'T12:00:00')-new Date(r.ausInicio+'T12:00:00'))/86400000)+1;
+      }else if(TIPO_AUS[t]&&TIPO_AUS[t].usaJornada&&(r.ausAM!==undefined&&r.ausAM!==null)){
+        dias=(r.ausAM&&r.ausPM)?1:0.5;   // medio día si solo AM o solo PM
+      }
+      if(t==='vacaciones')map[k].vacaciones+=dias;
+      else if(t==='licencia')map[k].licencias+=dias;
+      else if(t==='justificada')map[k].justificadas+=dias;
+      else if(t==='retiro')map[k].retiros+=dias;
+      else map[k].ausencias+=dias;
       return;
     }
     (r.labores||[]).forEach(l=>{map[k].horas+=l.horas||0;map[k].mesas+=l.mesas||0;map[k].cajas+=l.cajas||0});
   });
-  const rows=[['Trabajador','Subjefe','Días reportados','Horas totales','Mesas totales','Cajas cosechadas','Ausencias','Licencias médicas','Días vacaciones']];
-  Object.values(map).sort((a,b)=>a.nombre.localeCompare(b.nombre)).forEach(m=>{
-    rows.push([m.nombre,m.subjefe,m.dias.size,Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.ausencias,m.licencias,m.vacaciones]);
+  const rows=[['Trabajador','Subjefe','Días reportados','Horas totales','Mesas totales','Cajas cosechadas','Sin justificación (días)','Justificadas (días)','Retiros (días)','Licencias médicas (días)','Vacaciones (días)']];
+  Object.values(map).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es',{sensitivity:'base'})).forEach(m=>{
+    rows.push([m.nombre,m.subjefe,m.dias.size,Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.ausencias,m.justificadas,m.retiros,m.licencias,m.vacaciones]);
   });
   return rows;
 }
@@ -1615,34 +1907,45 @@ function buildSheetLabores(regs,ws){
   const map={};
   regs.forEach(r=>{
     if(r.ausente)return;
+    const lv=recLV(r);
     (r.labores||[]).forEach(l=>{
-      const id=l.laborId;if(!map[id])map[id]={horas:0,mesas:0,cajas:0,trabajadores:new Set(),dias:new Set()};
-      map[id].horas+=l.horas||0;map[id].mesas+=l.mesas||0;map[id].cajas+=l.cajas||0;
-      map[id].trabajadores.add(r.workerId);map[id].dias.add(r.fecha);
+      const nid=normLaborId(l.laborId,lv);  // agrupa por id de la lista vigente (v2)
+      if(!map[nid])map[nid]={horas:0,mesas:0,cajas:0,trabajadores:new Set(),dias:new Set()};
+      map[nid].horas+=l.horas||0;map[nid].mesas+=l.mesas||0;map[nid].cajas+=l.cajas||0;
+      map[nid].trabajadores.add(r.workerId);map[nid].dias.add(r.fecha);
     });
   });
   const rows=[['Código','Labor','Horas totales','Mesas totales','Cajas','N° trabajadores','Días con esta labor']];
-  Object.keys(map).map(Number).sort((a,b)=>a-b).forEach(id=>{
+  const keys=Object.keys(map);
+  const nums=keys.filter(k=>!String(k).startsWith('v1_')).map(Number).sort((a,b)=>a-b);
+  const legacy=keys.filter(k=>String(k).startsWith('v1_')).sort();
+  nums.forEach(id=>{
     const m=map[id];const lab=LABORES.find(x=>x.id===id);
     rows.push([id,lab?lab.d:'(desconocida)',Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.trabajadores.size,m.dias.size]);
+  });
+  legacy.forEach(k=>{
+    const m=map[k];const oldId=Number(String(k).slice(3));const lab=LABORES_V1.find(x=>x.id===oldId);
+    rows.push(['ant. '+oldId,(lab?lab.d:'(desconocida)')+' (lista antigua)',Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.trabajadores.size,m.dias.size]);
   });
   return rows;
 }
 
 function buildSheetCumplimientoFiltered(regs,ws,progs,f){
-  const rows=[['Fecha','Subjefe','Labor (cód.)','Labor (descripción)','Módulo','Meta mesas','Real mesas','Cumplimiento %']];
+  const rows=[['Fecha','Subjefe','Labor (cód.)','Labor (descripción)','Postura','Meta mesas','Real mesas','Cumplimiento %']];
   progs.forEach(p=>{
     Object.keys(p.dias||{}).forEach(iso=>{
       if(iso<f.desde||iso>f.hasta)return;
       (p.dias[iso]||[]).forEach(t=>{
-        const lab=LABORES.find(x=>x.id===t.laborId);
+        const plv=p.lv||1;
+        const lab=laborInfo(t.laborId,plv);
+        const tNorm=normLaborId(t.laborId,plv);
         const realMesas=regs.filter(r=>r.fecha===iso&&!r.ausente).reduce((s,r)=>{
           const w=ws.find(x=>x.id===r.workerId);if(!w||w.subjefe!==p.subjefe)return s;
-          return s+(r.labores||[]).filter(l=>l.laborId===t.laborId).reduce((ss,l)=>ss+(l.mesas||0),0);
+          return s+(r.labores||[]).filter(l=>normLaborId(l.laborId,recLV(r))===tNorm).reduce((ss,l)=>ss+(l.mesas||0),0);
         },0);
         const meta=t.metaMesas||0;
         const pct=meta>0?Math.round(realMesas/meta*100):'';
-        rows.push([iso,p.subjefe,t.laborId||'',lab?lab.d:'',t.modulo||'',meta||'',realMesas,pct]);
+        rows.push([iso,p.subjefe,t.laborId||'',lab?lab.d:'',t.postura?('Postura '+t.postura):(t.modulo||''),meta||'',realMesas,pct]);
       });
     });
   });
@@ -1655,8 +1958,8 @@ function buildSheetCosecha(regs,ws){
     if(r.ausente)return;
     const w=ws.find(x=>x.id===r.workerId);if(!w)return;
     (r.labores||[]).forEach(l=>{
-      if(l.laborId===48){
-        rows.push([r.fecha,w.nombre,w.subjefe,l.mesas||0,l.cajas||0]);
+      if(normLaborId(l.laborId,recLV(r))===ID_COSECHA){
+        rows.push([r.fecha,wDisplay(w),w.subjefe,l.mesas||0,l.cajas||0]);
       }
     });
   });
@@ -1666,20 +1969,105 @@ function buildSheetCosecha(regs,ws){
 }
 
 function buildSheetAusencias(regs,ws){
-  const rows=[['Fecha','Trabajador','Subjefe','Tipo','Reemplazante']];
+  const rows=[['Fecha','Trabajador','Subjefe','Tipo','Jornada','Inicio periodo','Término periodo','Reemplazante']];
   regs.filter(r=>r.ausente).forEach(r=>{
     const w=ws.find(x=>x.id===r.workerId);if(!w)return;
-    let tipo='Sin justificación';
-    if(r.vacaciones)tipo='Vacaciones';
-    else if(r.licencia)tipo='Licencia médica';
+    const t=tipoAusenciaDe(r);
+    const cfg=TIPO_AUS[t]||TIPO_AUS.sin;
+    const jornada=cfg.usaJornada?jornadaTxt(r):'';
+    const ini=cfg.usaPeriodo?(r.ausInicio||r.fecha):'';
+    const fin=cfg.usaPeriodo?(r.ausFin||r.fecha):'';
     let reemp='';
-    if(r.reemplazoWorkerId&&r.reemplazoWorkerId!=='sin'){
+    if(r.reemplazoWorkerId==='otro'){reemp='Otro (externo)';}
+    else if(r.reemplazoWorkerId&&r.reemplazoWorkerId!=='sin'){
       const rw=(wMap[r.reemplazoPredioId]||[]).find(x=>x.id===r.reemplazoWorkerId);
-      reemp=rw?rw.nombre:'(externo)';
+      reemp=rw?wDisplay(rw):'(externo)';
     }else if(r.reemplazoWorkerId==='sin'){reemp='Sin reemplazo';}
-    rows.push([r.fecha,w.nombre,w.subjefe,tipo,reemp]);
+    rows.push([r.fecha,wDisplay(w),w.subjefe,cfg.t,jornada,ini,fin,reemp]);
   });
   rows.splice(1,rows.length-1,...rows.slice(1).sort((a,b)=>a[0]===b[0]?a[1].localeCompare(b[1]):a[0].localeCompare(b[0])));
+  return rows;
+}
+
+// ── Costos ──
+function costoDeHoras(h){const hj=cfgGlobal.horasJornada||8;return h/hj*(cfgGlobal.costoJornada||0)}
+const fmtCLP=n=>'$'+Math.round(n).toLocaleString('es-CL');
+
+// Informe: labores por encargado (subjefe) con horas, jornadas y costo
+function buildSheetEncargados(regs,ws){
+  const map={}; // subjefe -> {nid:{horas,mesas}}
+  regs.forEach(r=>{
+    if(r.ausente)return;
+    const w=ws.find(x=>x.id===r.workerId);if(!w)return;
+    const lv=recLV(r);
+    (r.labores||[]).forEach(l=>{
+      const nid=normLaborId(l.laborId,lv);
+      const s=w.subjefe||'—';
+      map[s]=map[s]||{};
+      map[s][nid]=map[s][nid]||{horas:0,mesas:0};
+      map[s][nid].horas+=l.horas||0;map[s][nid].mesas+=l.mesas||0;
+    });
+  });
+  const hj=cfgGlobal.horasJornada||8;
+  const rows=[['Encargado (subjefe)','Código','Labor','Horas','Mesas','Jornadas equiv.','Costo (CLP)']];
+  let totH=0;
+  Object.keys(map).sort((a,b)=>a.localeCompare(b,'es')).forEach(s=>{
+    let sh=0;
+    const keys=Object.keys(map[s]);
+    const nums=keys.filter(k=>!String(k).startsWith('v1_')).map(Number).sort((a,b)=>a-b);
+    const legacy=keys.filter(k=>String(k).startsWith('v1_')).sort();
+    const push=(code,desc,m)=>{
+      rows.push([s,code,desc,Number(m.horas.toFixed(2)),m.mesas,Number((m.horas/hj).toFixed(2)),Math.round(costoDeHoras(m.horas))]);
+      sh+=m.horas;
+    };
+    nums.forEach(id=>{const lab=LABORES.find(x=>x.id===id);push(id,lab?lab.d:'(desconocida)',map[s][id])});
+    legacy.forEach(k=>{const oldId=Number(String(k).slice(3));const lab=LABORES_V1.find(x=>x.id===oldId);push('ant. '+oldId,(lab?lab.d:'(desconocida)')+' (lista antigua)',map[s][k])});
+    rows.push([s+' — TOTAL','','',Number(sh.toFixed(2)),'',Number((sh/hj).toFixed(2)),Math.round(costoDeHoras(sh))]);
+    totH+=sh;
+  });
+  if(rows.length>1)rows.push(['TOTAL GENERAL','','',Number(totH.toFixed(2)),'',Number((totH/hj).toFixed(2)),Math.round(costoDeHoras(totH))]);
+  return rows;
+}
+
+// Evaluaciones de labores (1 muy bien, 2 bien, 3 mal) → ranking de capacidades
+function collectEvals(regs,ws){
+  const porTrab={},porLabor={};
+  regs.forEach(r=>{
+    if(r.ausente)return;
+    const w=ws.find(x=>x.id===r.workerId);
+    const lv=recLV(r);
+    (r.labores||[]).forEach(l=>{
+      if(!l.eval)return;
+      if(w){
+        const k=w.id;
+        porTrab[k]=porTrab[k]||{nombre:wDisplay(w),subjefe:w.subjefe,n:0,sum:0,c:{1:0,2:0,3:0}};
+        porTrab[k].n++;porTrab[k].sum+=l.eval;porTrab[k].c[l.eval]++;
+      }
+      const nid=normLaborId(l.laborId,lv);
+      const lab=(typeof nid==='number')?LABORES.find(x=>x.id===nid):LABORES_V1.find(x=>x.id===Number(String(nid).slice(3)));
+      const key=String(nid);
+      porLabor[key]=porLabor[key]||{code:(typeof nid==='number')?nid:'ant. '+String(nid).slice(3),desc:lab?lab.d:'(desconocida)',n:0,sum:0,c:{1:0,2:0,3:0}};
+      porLabor[key].n++;porLabor[key].sum+=l.eval;porLabor[key].c[l.eval]++;
+    });
+  });
+  return {porTrab,porLabor};
+}
+const capPct=avg=>Math.round((3-avg)/2*100);   // 1→100%, 2→50%, 3→0%
+
+function buildSheetRankingTrab(porTrab){
+  const rows=[['Puesto','Trabajador','Subjefe','N° evaluaciones','Promedio (1=muy bien · 3=mal)','Muy bien (1)','Bien (2)','Mal (3)','Capacidad %']];
+  Object.values(porTrab)
+    .map(m=>({...m,avg:m.sum/m.n}))
+    .sort((a,b)=>a.avg-b.avg||b.n-a.n)
+    .forEach((m,i)=>rows.push([i+1,m.nombre,m.subjefe,m.n,Number(m.avg.toFixed(2)),m.c[1],m.c[2],m.c[3],capPct(m.avg)]));
+  return rows;
+}
+function buildSheetRankingLabor(porLabor){
+  const rows=[['Puesto','Código','Labor','N° evaluaciones','Promedio (1=muy bien · 3=mal)','Muy bien (1)','Bien (2)','Mal (3)','Capacidad %']];
+  Object.values(porLabor)
+    .map(m=>({...m,avg:m.sum/m.n}))
+    .sort((a,b)=>a.avg-b.avg||b.n-a.n)
+    .forEach((m,i)=>rows.push([i+1,m.code,m.desc,m.n,Number(m.avg.toFixed(2)),m.c[1],m.c[2],m.c[3],capPct(m.avg)]));
   return rows;
 }
 
@@ -1709,6 +2097,7 @@ async function generarInforme(tipo){
     const wb=XLSX.utils.book_new();
     let nombre='';
     let datos;
+    let nota='';
     if(tipo==='trabajadores'){datos=buildSheetTrabajadores(regs,ws);nombre='Por trabajador';}
     else if(tipo==='labores'){datos=buildSheetLabores(regs,ws);nombre='Por labor';}
     else if(tipo==='cumplimiento'){
@@ -1717,12 +2106,27 @@ async function generarInforme(tipo){
     }
     else if(tipo==='cosecha'){datos=buildSheetCosecha(regs,ws);nombre='Cosecha';}
     else if(tipo==='ausencias'){datos=buildSheetAusencias(regs,ws);nombre='Ausencias licencias y vacaciones';}
+    else if(tipo==='encargados'){
+      datos=buildSheetEncargados(regs,ws);nombre='Por encargado';
+      if(!cfgGlobal.costoJornada)nota='ℹ️ Costo jornada no configurado (Config → Costo jornada hombre): los costos salen en $0.';
+    }
+    else if(tipo==='ranking'){
+      const {porTrab,porLabor}=collectEvals(regs,ws);
+      const dT=buildSheetRankingTrab(porTrab),dL=buildSheetRankingLabor(porLabor);
+      if(dT.length<=1&&dL.length<=1){msg.textContent='⚠️ No hay labores evaluadas en el rango (usa el campo Evaluación al registrar)';toast('Sin evaluaciones en el periodo');return}
+      XLSX.utils.book_append_sheet(wb,aoaToSheet(dT),'Ranking trabajadores');
+      XLSX.utils.book_append_sheet(wb,aoaToSheet(dL),'Ranking labores');
+      const fn=`Arrayanes_Ranking_capacidades_${f.desde}_a_${f.hasta}.xlsx`;
+      descargarXLSX(wb,fn);
+      msg.textContent='✅ Descargado: '+fn;
+      return;
+    }
     else{toast('Tipo de informe desconocido');return}
     if(datos.length<=1){msg.textContent='⚠️ No hay datos en el rango seleccionado';toast('Sin datos para este informe');return}
     XLSX.utils.book_append_sheet(wb,aoaToSheet(datos),nombre.slice(0,31));
     const filename=`Arrayanes_${nombre.replace(/[^\w]/g,'_')}_${f.desde}_a_${f.hasta}.xlsx`;
     descargarXLSX(wb,filename);
-    msg.textContent='✅ Descargado: '+filename;
+    msg.textContent='✅ Descargado: '+filename+(nota?' · '+nota:'');
   }catch(e){msg.textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
 }
 
@@ -1748,20 +2152,75 @@ async function generarInformeCompleto(){
       ['Hojas incluidas:'],
       ['1. Por trabajador'],
       ['2. Por labor'],
-      ['3. Programado vs Real'],
-      ['4. Cosecha'],
-      ['5. Ausencias, licencias y vacaciones']
+      ['3. Por encargado (horas, jornadas y costo)'],
+      ['4. Programado vs Real'],
+      ['5. Cosecha'],
+      ['6. Ausencias, licencias y vacaciones'],
+      ['7. Ranking capacidades (trabajadores y labores)'],
+      [],
+      ['Costo jornada hombre (CLP)',cfgGlobal.costoJornada||'(no configurado)'],
+      ['Horas por jornada',cfgGlobal.horasJornada||8]
     ];
     XLSX.utils.book_append_sheet(wb,aoaToSheet(resumen),'Resumen');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetTrabajadores(regs,ws)),'Por trabajador');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetLabores(regs,ws)),'Por labor');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetEncargados(regs,ws)),'Por encargado');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCumplimientoFiltered(regs,ws,progs,f)),'Prog vs Real');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCosecha(regs,ws)),'Cosecha');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetAusencias(regs,ws)),'Ausencias');
+    const {porTrab,porLabor}=collectEvals(regs,ws);
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetRankingTrab(porTrab)),'Ranking trabajadores');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetRankingLabor(porLabor)),'Ranking labores');
     const filename=`Arrayanes_Informe_${f.desde}_a_${f.hasta}.xlsx`;
     descargarXLSX(wb,filename);
     msg.textContent='✅ Descargado: '+filename;
   }catch(e){msg.textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+
+// ── GRÁFICOS DEL PERIODO (Informes) ──
+function barRow(label,value,maxV,txt,color){
+  const pct=maxV>0?Math.max(2,Math.round(value/maxV*100)):0;
+  return `<div style="margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+      <span style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</span>
+      <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);flex-shrink:0">${txt}</span>
+    </div>
+    <div class="avbar"><div class="avfill" style="width:${pct}%${color?';background:'+color:''}"></div></div>
+  </div>`;
+}
+function capColor(p){return p>=75?'var(--green)':p>=50?'#F4A261':'var(--red)'}
+function renderInfCharts(){
+  const f=getInfFiltros();if(!f)return;
+  const regs=filtrarRegistros(f);
+  const ws=pWs();
+  const div=document.getElementById('infCharts');
+  if(!regs.length){div.innerHTML=`<div class="card"><div class="empty"><div class="empty-icon">📊</div><div>Sin registros en el rango seleccionado</div></div></div>`;return}
+  // Horas por encargado (con costo)
+  const bySub={};
+  regs.forEach(r=>{if(r.ausente)return;const w=ws.find(x=>x.id===r.workerId);if(!w)return;(r.labores||[]).forEach(l=>{bySub[w.subjefe]=(bySub[w.subjefe]||0)+(l.horas||0)})});
+  const subs=Object.entries(bySub).sort((a,b)=>b[1]-a[1]);
+  const maxH=Math.max(1,...subs.map(s=>s[1]));
+  // Rankings de capacidad
+  const {porTrab,porLabor}=collectEvals(regs,ws);
+  const trab=Object.values(porTrab).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
+  const labs=Object.values(porLabor).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
+  const costoNota=cfgGlobal.costoJornada?'':`<p style="font-size:11px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:6px 10px;margin-bottom:8px">ℹ️ Configura el costo de la jornada (Config → Costo jornada hombre) para ver costos reales.</p>`;
+  div.innerHTML=`
+    <div class="card">
+      <div class="card-title">⏱ Horas y costo por encargado</div>
+      ${costoNota}
+      ${subs.length?subs.map(([s,h])=>barRow('👤 '+s,h,maxH,`${h.toFixed(1)} h · ${fmtCLP(costoDeHoras(h))}`)).join(''):'<div class="empty"><div>Sin horas registradas</div></div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">🏆 Capacidad por trabajador</div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Según evaluaciones de labores (1 muy bien · 2 bien · 3 mal). 100% = todas «muy bien».</p>
+      ${trab.length?trab.map(m=>barRow(m.nombre,m.pct,100,`${m.pct}% · ${m.n} eval. · prom. ${m.avg.toFixed(2)}`,capColor(m.pct))).join(''):'<div class="empty"><div>Sin labores evaluadas en el periodo</div></div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">🌱 Capacidad por labor</div>
+      ${labs.length?labs.map(m=>barRow(`${m.code}. ${m.desc}`,m.pct,100,`${m.pct}% · ${m.n} eval.`,capColor(m.pct))).join(''):'<div class="empty"><div>Sin labores evaluadas en el periodo</div></div>'}
+    </div>`;
+  div.scrollIntoView({behavior:'smooth'});
 }
 
 function showScr(name,btn){
