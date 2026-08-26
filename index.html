@@ -590,7 +590,12 @@ const LABORES=[
   {id:55,d:"Emparejar pasillos"},
   {id:56,d:"Colocar el tutor que soporta la vara en naves de cercha (El Tránsito y P12)"},
   {id:57,d:"En naves altas amarrar hilo al alambre de conducción y hacer argolla"},
-  {id:58,d:"Abrir cintas entre 30 y 40 cm entre ellas"}
+  {id:58,d:"Abrir cintas entre 30 y 40 cm entre ellas"},
+  {id:59,d:"Cambio de cultivo (agrupa: cortar plantas, descolgar, retirar plantas del invernadero, sacar llave de cola, sacar grapas, sacar acolchado, sacar cintas de riego, levantar chicote y amarrarlo, sacar perrera, marcar, perforar, conectar cintas a planza)"},
+  {id:60,d:"Sacar llave de cola"},
+  {id:61,d:"Sacar grapas"},
+  {id:62,d:"Sacar perrera"},
+  {id:63,d:"Levantar chicote y amarrarlo"}
 ];
 // Lista antigua (versión 1) — solo para mostrar registros históricos guardados antes del cambio
 const LABORES_V1=[
@@ -1510,16 +1515,18 @@ async function borrarCiclo(predioId,subjefe,cicloId){
 // ══════════════════════════════════════════════
 // PROGRAMACIÓN SEMANAL
 // ══════════════════════════════════════════════
-function getProgMonday(offset=0){
+// La semana de programación va de MIÉRCOLES a MARTES.
+// El documento se guarda con la fecha del miércoles que la inicia.
+function getProgMonday(offset=0){   // (nombre histórico; retorna el miércoles de inicio)
   const d=new Date(today),dow=d.getDay();
-  d.setDate(d.getDate()-(dow===0?6:dow-1)+offset*7);
+  d.setDate(d.getDate()-((dow-3+7)%7)+offset*7);
   return d.toISOString().slice(0,10);
 }
-function getProgDays(mondayIso){
-  const base=new Date(mondayIso);
-  return [1,2,3,4,7].map(o=>{const d=new Date(base);d.setDate(base.getDate()+o);return d.toISOString().slice(0,10)});
+function getProgDays(startIso){
+  const base=new Date(startIso);
+  return [0,1,2,5,6].map(o=>{const d=new Date(base);d.setDate(base.getDate()+o);return d.toISOString().slice(0,10)});
 }
-const PROG_DAY_NAMES={1:'Martes',2:'Miércoles',3:'Jueves',4:'Viernes',7:'Lunes (sig.)'};
+const PROG_DAY_NAMES={0:'Miércoles',1:'Jueves',2:'Viernes',5:'Lunes',6:'Martes'};
 function progDayName(mondayIso,dayIso){
   const diff=Math.round((new Date(dayIso)-new Date(mondayIso))/(86400000));
   return PROG_DAY_NAMES[diff]||dayIso;
@@ -1528,10 +1535,10 @@ function getWeekNum(iso){const d=new Date(iso),sy=new Date(d.getFullYear(),0,1);
 function progNavSem(delta){progWeekOffset+=delta;renderProg();}
 function progGoToWeek(iso){
   if(!iso){progWeekOffset=0;renderProg();return;}
-  // Calcular el lunes de la semana de la fecha elegida
+  // Calcular el MIÉRCOLES que inicia la semana de programación de la fecha elegida
   const d=new Date(iso+'T12:00:00');
   const dow=d.getDay();
-  d.setDate(d.getDate()-(dow===0?6:dow-1));
+  d.setDate(d.getDate()-((dow-3+7)%7));
   const targetMonday=d.toISOString().slice(0,10);
   const todayMonday=getProgMonday(0);
   const diffDays=Math.round((new Date(targetMonday+'T12:00:00')-new Date(todayMonday+'T12:00:00'))/86400000);
@@ -1550,7 +1557,7 @@ function populateProgSubjefe(){
 async function renderProg(){
   const mondayIso=getProgMonday(progWeekOffset);
   const progDays=getProgDays(mondayIso);
-  document.getElementById('progSemLabel').textContent=`Semana ${getWeekNum(mondayIso)} — programada el lunes`;
+  document.getElementById('progSemLabel').textContent=`Semana ${getWeekNum(mondayIso)} — miércoles a martes`;
   document.getElementById('progSemRange').textContent=`${fDMY(mondayIso)} → ${fDMY(progDays[4])}`;
   const dp=document.getElementById('progDatePicker');if(dp)dp.value=mondayIso;
   const subjefe=document.getElementById('progSubjefe').value;
@@ -1611,7 +1618,7 @@ async function renderProg(){
 
 function openModalNuevaProg(subjefe,mondayIso){
   const progDays=getProgDays(mondayIso);
-  const dayNames=['Martes','Miércoles','Jueves','Viernes','Lunes (sig.)'];
+  const dayNames=['Miércoles','Jueves','Viernes','Lunes','Martes'];
   window._progEdit={predioId:activePred,subjefe,mondayIso,dias:{}};
   progDays.forEach(iso=>{window._progEdit.dias[iso]=[];});
   document.getElementById('modalContent').innerHTML=`
