@@ -68,6 +68,7 @@ body{font-family:'Inter',sans-serif;background:var(--cream);color:var(--text);ma
 .user-name{font-size:11px;color:var(--lime);font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .role-badge{font-family:'DM Mono',monospace;font-size:8px;padding:1px 5px;border-radius:8px;text-transform:uppercase;font-weight:700}
 .role-admin{background:#FEF3C7;color:#92400E}
+.role-jefe{background:#DBEAFE;color:#1D4ED8}
 .role-subjefe{background:var(--lime);color:var(--green)}
 
 /* ── TOPBAR ── */
@@ -459,7 +460,7 @@ select:focus,input:focus{border-color:var(--green)}
     <div id="usersAdminSection" style="display:none">
       <div class="card">
         <div class="card-title">🔐 Usuarios del sistema</div>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">Crea un acceso por cada subjefe. Usa el email que ellos tendrán. La contraseña inicial la compartes tú.</p>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">Roles: <strong>Administrador</strong> (Gerencia y Jefe de campo) ve y gestiona todo · <strong>Jefe de zona</strong> ve todo lo de su zona · <strong>Subjefe</strong> ve solo su grupo. La contraseña inicial la compartes tú.</p>
         <div id="usersList"></div>
         <div class="sec-div">Crear usuario</div>
         <div class="form-row"><label>Nombre visible</label><input type="text" id="nuEmail_name" placeholder="Ej: Sara"></div>
@@ -469,7 +470,8 @@ select:focus,input:focus{border-color:var(--green)}
           <div><label>Rol</label>
             <select id="nuRole" onchange="if(this.value==='admin')document.getElementById('nuPredio').value='todos'">
               <option value="subjefe">Subjefe</option>
-              <option value="admin">Admin / Gerencia</option>
+              <option value="jefe">Jefe de zona</option>
+              <option value="admin">Administrador (Gerencia / Jefe de campo)</option>
             </select>
           </div>
           <div><label>Predio / Zona</label>
@@ -522,7 +524,7 @@ select:focus,input:focus{border-color:var(--green)}
 // STATIC DATA
 // ══════════════════════════════════════════════
 const PREDIOS={
-  z1:{nombre:'Zona 1 La Viña', jefe:'José Yañez',        subjefes:['Mirta Peña']},
+  z1:{nombre:'Zona 1 La Viña', jefe:'José Yáñez',        subjefes:['Mirta Peña']},
   z2:{nombre:'Zona 2',         jefe:'Guillermo Olivares', subjefes:['Santiago Orrego']},
   z3:{nombre:'Zona 3',         jefe:'René Albornoz',      subjefes:['Claudio Cuevas']}
 };
@@ -714,6 +716,12 @@ const loading=(show,txt='Cargando…')=>{
 };
 
 function isAdmin(){return currentProfile&&currentProfile.role==='admin'}
+// Jefe de zona: ve y gestiona TODO lo de su zona (todos sus subjefes), sin acceso
+// a otras zonas ni a administración (usuarios, informes, trabajadores, costos)
+function isJefe(){return currentProfile&&currentProfile.role==='jefe'}
+// ¿Puede ver todos los subjefes del predio activo? (admin y jefe de zona sí; subjefe no)
+function veTodoPredio(){return isAdmin()||isJefe()}
+const ROLE_LABEL={admin:'Admin',jefe:'Jefe de zona',subjefe:'Subjefe'};
 function canEditPredio(pid){
   if(isAdmin())return true;
   return currentProfile&&currentProfile.predioId===pid;
@@ -965,12 +973,12 @@ function renderCtx(){['ctx0','ctx2','ctx-prog'].forEach(id=>{const el=document.g
 function populateSels(){
   const p=pD();
   // For subjefes: preselect their group
-  const defSub=isAdmin()?'':userSubjefe();
+  const defSub=veTodoPredio()?'':userSubjefe();
   ['selSub','fS'].forEach(sid=>{
     const sel=document.getElementById(sid);if(!sel)return;
-    sel.innerHTML=`<option value="">${isAdmin()?'Todos':defSub}</option>`+
-      (isAdmin()?p.subjefes.map(s=>`<option value="${s}">${s}</option>`).join(''):'');
-    if(!isAdmin())sel.value=defSub;
+    sel.innerHTML=`<option value="">${veTodoPredio()?'Todos':defSub}</option>`+
+      (veTodoPredio()?p.subjefes.map(s=>`<option value="${s}">${s}</option>`).join(''):'');
+    if(!veTodoPredio())sel.value=defSub;
   });
   const ns=document.getElementById('nS');
   if(ns)ns.innerHTML=p.subjefes.map(s=>`<option>${s}</option>`).join('');
@@ -980,7 +988,7 @@ function populateSels(){
 }
 
 function filtW(){
-  const sub=document.getElementById('selSub').value||(isAdmin()?'':userSubjefe());
+  const sub=document.getElementById('selSub').value||(veTodoPredio()?'':userSubjefe());
   const sel=document.getElementById('selW');const cur=sel.value;
   // Arrayanes uses pool workers - always show all, ignore subjefe filter
   const list=sortWs(pWs());
@@ -1172,7 +1180,7 @@ function renderHoy(){
   const div=document.getElementById('hoy');if(!div)return;
   // filter by date; if subjefe, also by their group
   let entries=rCache.filter(r=>r.fecha===selDate);
-  if(!isAdmin()){const sub=userSubjefe();entries=entries.filter(r=>{const w=pWs().find(x=>x.id===r.workerId);return w&&w.subjefe===sub});}
+  if(!veTodoPredio()){const sub=userSubjefe();entries=entries.filter(r=>{const w=pWs().find(x=>x.id===r.workerId);return w&&w.subjefe===sub});}
   if(!entries.length){div.innerHTML=`<div class="empty"><div class="empty-icon">📝</div><div>Sin entradas para este día</div></div>`;return}
   div.innerHTML=entries.map(e=>eHTML(e)).join('');
 }
@@ -1184,7 +1192,7 @@ function eHTML(e,pred=activePred){
   const labores=e.labores||[{laborId:e.laborId,horas:e.horas||0,mesas:e.mesas||0}];
   const totalH=labores.reduce((s,l)=>s+(l.horas||0),0);
   const totalM=labores.reduce((s,l)=>s+(l.mesas||0),0);
-  const canDel=isAdmin()||(w&&w.subjefe===userSubjefe());
+  const canDel=veTodoPredio()||(w&&w.subjefe===userSubjefe());
 
   let reemplazoHTML='';
   if(e.ausente){
@@ -1326,7 +1334,7 @@ function renderAvance(){
   const entryH=e=>(e.labores||[{horas:e.horas||0}]).reduce((s,l)=>s+(l.horas||0),0);
   const entryM=e=>(e.labores||[{mesas:e.mesas||0}]).reduce((s,l)=>s+(l.mesas||0),0);
   let todayE=rCache.filter(r=>r.fecha===selDate);
-  if(!isAdmin()){const sub=userSubjefe();todayE=todayE.filter(r=>{const w=pWs().find(x=>x.id===r.workerId);return w&&w.subjefe===sub});}
+  if(!veTodoPredio()){const sub=userSubjefe();todayE=todayE.filter(r=>{const w=pWs().find(x=>x.id===r.workerId);return w&&w.subjefe===sub});}
   const tH=todayE.reduce((s,r)=>s+entryH(r),0),tM=todayE.reduce((s,r)=>s+entryM(r),0);
   document.getElementById('statsRow').innerHTML=`
     <div class="sbox"><div class="sval">${rCache.length}</div><div class="slbl">Total reg.</div></div>
@@ -1335,7 +1343,7 @@ function renderAvance(){
   const wd=weekDates();
   let wRegs=rCache.filter(r=>wd.includes(r.fecha));
   const wMesas=e=>(e.labores||[{mesas:e.mesas||0}]).reduce((s,l)=>s+(l.mesas||0),0);
-  const visWs=sortWs(isAdmin()?pWs():pWs().filter(w=>w.subjefe===userSubjefe()));
+  const visWs=sortWs(veTodoPredio()?pWs():pWs().filter(w=>w.subjefe===userSubjefe()));
   const maxM=Math.max(1,...visWs.map(w=>wd.reduce((s,fd)=>s+wRegs.filter(r=>r.workerId===w.id&&r.fecha===fd).reduce((ss,e)=>ss+wMesas(e),0),0)));
   document.getElementById('avW').innerHTML=visWs.length?visWs.map(w=>{
     const tot=wd.reduce((s,fd)=>s+wRegs.filter(r=>r.workerId===w.id&&r.fecha===fd).reduce((ss,e)=>ss+wMesas(e),0),0);
@@ -1356,7 +1364,7 @@ function renderAvance(){
     </tr></thead>
     <tbody>${wd.map((iso,i)=>{
       let dr=rCache.filter(r=>r.fecha===iso);
-      if(!isAdmin()){const sub=userSubjefe();dr=dr.filter(r=>{const w=pWs().find(x=>x.id===r.workerId);return w&&w.subjefe===sub});}
+      if(!veTodoPredio()){const sub=userSubjefe();dr=dr.filter(r=>{const w=pWs().find(x=>x.id===r.workerId);return w&&w.subjefe===sub});}
       const h=dr.reduce((s,r)=>s+entryH(r),0),m=dr.reduce((s,r)=>s+entryM(r),0),isT=iso===selDate;
       return `<tr style="${isT?'background:var(--lime);':''}border-bottom:1px solid var(--sand)">
         <td style="padding:6px 3px;font-weight:${isT?700:400}">${DIAS[i]} ${iso.slice(8)}</td>
@@ -1382,7 +1390,7 @@ function renderCiclos(){
     const pl=document.createElement('div');pl.className='pred-label';
     pl.innerHTML=`<div class="pred-label-dot" style="background:var(--c-${pc})"></div><span class="pred-label-name" style="color:var(--c-${pc})">${p.nombre}</span>`;
     div.appendChild(pl);
-    const subs=isAdmin()?p.subjefes:p.subjefes.filter(s=>s===userSubjefe());
+    const subs=veTodoPredio()?p.subjefes:p.subjefes.filter(s=>s===userSubjefe());
     subs.forEach(sub=>{
       const cycles=cyclesOf(pid,sub).slice().sort((a,b)=>b.inicio.localeCompare(a.inicio));
       const gb=document.createElement('div');gb.className='group-block';
@@ -1549,7 +1557,7 @@ function progGoToWeek(iso){
 function populateProgSubjefe(){
   const sel=document.getElementById('progSubjefe');if(!sel)return;
   const cur=sel.value;
-  if(!isAdmin()){sel.innerHTML=`<option value="${userSubjefe()}">${userSubjefe()}</option>`;sel.value=userSubjefe();return;}
+  if(!veTodoPredio()){sel.innerHTML=`<option value="${userSubjefe()}">${userSubjefe()}</option>`;sel.value=userSubjefe();return;}
   sel.innerHTML=`<option value="">— Seleccionar —</option>`+pD().subjefes.map(s=>`<option value="${s}">${s}</option>`).join('');
   if(!cur&&pD().subjefes.length===1)sel.value=pD().subjefes[0];else sel.value=cur;
 }
@@ -1810,7 +1818,7 @@ async function loadUsers(){
     div.innerHTML=usersCache.map(u=>`<div class="user-row">
       <div class="ur-info">
         <div class="ur-name">${u.nombre||u.email}</div>
-        <div class="ur-meta">${u.email} · <span class="role-badge ${u.role==='admin'?'role-admin':'role-subjefe'}">${u.role}</span> · ${u.predioId||'—'} ${u.subjefe?'· '+u.subjefe:''}</div>
+        <div class="ur-meta">${u.email} · <span class="role-badge ${u.role==='admin'?'role-admin':u.role==='jefe'?'role-jefe':'role-subjefe'}">${ROLE_LABEL[u.role]||u.role}</span> · ${u.predioId||'—'} ${u.subjefe?'· '+u.subjefe:''}</div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
         <button class="btn btn-secondary btn-sm" onclick="modalEditarUsuario('${u.uid}')">✏️</button>
@@ -1829,6 +1837,8 @@ async function createUser(){
   const predioId=document.getElementById('nuPredio').value;
   const subjefe=document.getElementById('nuSubjefe').value;
   if(!email||!pass||pass.length<6){toast('⚠️ Email y contraseña (mín. 6 caracteres) requeridos');return}
+  if(role==='jefe'&&predioId==='todos'){toast('⚠️ El Jefe de zona debe tener una zona específica (1, 2 o 3)');return}
+  if(role==='subjefe'&&!subjefe){toast('⚠️ Para rol Subjefe asigna un subjefe');return}
   loading(true,'Creando usuario…');
   try{
     // Create auth user via Firebase Admin would be ideal, but from client we
@@ -1875,8 +1885,9 @@ function modalEditarUsuario(uid){
     <div class="form-grid">
       <div><label>Rol</label>
         <select id="euRole" onchange="if(this.value==='admin')document.getElementById('euPredio').value='todos'">
-          <option value="subjefe"${u.role!=='admin'?' selected':''}>Subjefe</option>
-          <option value="admin"${u.role==='admin'?' selected':''}>Admin / Gerencia</option>
+          <option value="subjefe"${u.role!=='admin'&&u.role!=='jefe'?' selected':''}>Subjefe</option>
+          <option value="jefe"${u.role==='jefe'?' selected':''}>Jefe de zona</option>
+          <option value="admin"${u.role==='admin'?' selected':''}>Administrador (Gerencia / Jefe de campo)</option>
         </select>
       </div>
       <div><label>Predio / Zona</label>
@@ -1902,6 +1913,7 @@ async function guardarEdicionUsuario(uid){
   const subjefe=document.getElementById('euSubjefe').value;
   const nombre=document.getElementById('euNombre').value.trim();
   if(role==='subjefe'&&!subjefe){toast('⚠️ Para rol Subjefe asigna un subjefe');return}
+  if(role==='jefe'&&predioId==='todos'){toast('⚠️ El Jefe de zona debe tener una zona específica (1, 2 o 3)');return}
   if(uid===currentUser.uid&&role!=='admin'&&!confirm('Estás quitándote a TI MISMO el rol de administrador. ¿Seguro? Podrías quedar sin acceso a Config/Informes.'))return;
   loading(true,'Guardando…');
   try{
