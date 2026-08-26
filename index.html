@@ -920,10 +920,18 @@ function getCicloEn(predioId,subjefe,fecha=todayIso){
 function getCicloAbiertoTemporada(predioId,subjefe,temporada){
   return cyclesOf(predioId,subjefe).find(c=>c.fin===null&&c.temporada===temporada)||null;
 }
+// Distintivo cuando hay varios ciclos de la MISMA temporada (plantación escalonada):
+// se muestra el sector si lo tiene, o la fecha de plantación
+function cicloExtra(c,counts){
+  if(c.sector)return ' · '+c.sector;
+  if(counts[c.temporada]>1)return ' · '+fDMY(c.inicio);
+  return '';
+}
 function cicloBadges(predioId,subjefe,fecha=todayIso,fontSize='10px',pad='2px 8px'){
   const cs=getCiclosEn(predioId,subjefe,fecha);
   if(!cs.length)return `<span class="tbadge tb-none" style="font-size:${fontSize};padding:${pad}">Sin ciclo</span>`;
-  return cs.map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:${fontSize};padding:${pad}">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${c.fin===null?' ●':''}</span>`).join('');
+  const counts={};cs.forEach(c=>counts[c.temporada]=(counts[c.temporada]||0)+1);
+  return cs.map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:${fontSize};padding:${pad}">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${cicloExtra(c,counts)}${c.fin===null?' ●':''}</span>`).join('');
 }
 
 // ══════════════════════════════════════════════
@@ -1220,7 +1228,7 @@ function eHTML(e,pred=activePred){
     ${reemplazoHTML}
     <div class="badges" style="margin:7px 0">
       <span class="badge b${pc}">${PREDIOS[pred].nombre}</span>
-      ${ciclosE.map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:9px;padding:2px 7px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}</span>`).join('')}
+      ${(()=>{const cnt={};ciclosE.forEach(c=>cnt[c.temporada]=(cnt[c.temporada]||0)+1);return ciclosE.map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:9px;padding:2px 7px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${cicloExtra(c,cnt)}</span>`).join('')})()}
       ${labores.length>1?`<span class="badge" style="background:var(--sand);color:var(--dark)">${labores.length} labores</span>`:''}
       ${totalH?`<span class="badge bh">⏱ ${totalH}h total</span>`:''}
       ${totalM?`<span class="badge bm">🪴 ${totalM} mesas</span>`:''}
@@ -1386,6 +1394,7 @@ function renderCiclos(){
           ci.innerHTML=`<div class="ci-top">
             <div>
               <span class="tbadge tb-${c.temporada}" style="font-size:10px;padding:2px 9px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}</span>
+              ${c.sector?`<span class="stag" style="font-size:10px;margin-left:4px">📍 ${c.sector}</span>`:''}
               <div class="ci-dates">Inicio: ${fDMY(c.inicio)} · ${isOpen?'<strong style="color:var(--c-primor)">En curso</strong>':`Cierre: ${fDMY(c.fin)}`}</div>
               ${c.superficieM2?`<div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:2px">📐 ${c.superficieM2.toLocaleString()} m²</div>`:''}
               ${isFuture?`<span class="ci-status-future">Futuro</span>`:isOpen?`<span class="ci-status-open">● Abierto</span>`:`<span class="ci-status-closed">Cerrado</span>`}
@@ -1417,7 +1426,8 @@ async function modalAbrirCiclo(predioId,subjefe){
     <div class="modal-title">🌱 Abrir ciclo — ${subjefe}</div>
     <div class="modal-sub">Registra la fecha real de inicio. Puedes cerrarlo cuando termine el cultivo.</div>
     <div class="form-row"><label>Temporada</label><select id="mTemp">${TORDER.map(k=>`<option value="${k}">${TICONS[k]} ${TNAMES[k]}</option>`).join('')}</select></div>
-    <div class="form-row"><label>Fecha de inicio</label><input type="date" id="mIni" value="${todayIso}"></div>
+    <div class="form-row"><label>Fecha de inicio (plantación)</label><input type="date" id="mIni" value="${todayIso}"></div>
+    <div class="form-row"><label>Sector / referencia <span style="font-weight:400;text-transform:none">(distingue plantaciones de la misma época)</span></label><input type="text" id="mSector" placeholder="Ej: Nave 3, P12, 1ª plantación"></div>
     <div class="form-row"><label>Superficie (m²)</label><input type="number" id="mM2" placeholder="Ej: 5000" min="0"></div>
     <div class="form-row"><label>Notas</label><input type="text" id="mNot" placeholder="Ej: Plantación 3ª semana diciembre"></div>
     <button class="btn btn-primary" onclick="guardarApertura('${predioId}','${subjefe}')">Abrir ciclo</button>`;
@@ -1425,12 +1435,16 @@ async function modalAbrirCiclo(predioId,subjefe){
 }
 async function guardarApertura(predioId,subjefe){
   const temp=document.getElementById('mTemp').value,ini=document.getElementById('mIni').value,notas=document.getElementById('mNot').value.trim();
+  const sector=document.getElementById('mSector').value.trim();
   const m2=parseInt(document.getElementById('mM2').value)||0;
   if(!ini){toast('⚠️ Ingresa fecha de inicio');return}
-  if(getCicloAbiertoTemporada(predioId,subjefe,temp)){toast('⚠️ Ya hay un ciclo de '+TNAMES[temp]+' abierto para este subjefe.');return}
+  // Puede haber más de una plantación de la MISMA época (escalonada, ej. trastomate en
+  // fechas distintas): solo se pide confirmación para evitar duplicados por error.
+  const abierto=getCicloAbiertoTemporada(predioId,subjefe,temp);
+  if(abierto&&!confirm(`Ya hay un ciclo de ${TNAMES[temp]} abierto para ${subjefe} (inicio ${fDMY(abierto.inicio)}${abierto.sector?', '+abierto.sector:''}).\n\n¿Abrir OTRO ciclo de ${TNAMES[temp]} con otra fecha de plantación? Usa el campo Sector para distinguirlos.`))return;
   loading(true,'Guardando ciclo…');
   try{
-    await colCiclos(predioId,subjefe).add({temporada:temp,inicio:ini,fin:null,notas,superficieM2:m2,creadoPor:currentUser.uid,ts:Date.now()});
+    await colCiclos(predioId,subjefe).add({temporada:temp,inicio:ini,fin:null,sector,notas,superficieM2:m2,creadoPor:currentUser.uid,ts:Date.now()});
     closeModal();toast('✅ Ciclo abierto');
   }catch(e){toast('Error: '+e.message)}
   loading(false);
@@ -1466,6 +1480,7 @@ async function modalEditarCiclo(predioId,subjefe,cicloId){
     <div class="form-row"><label>Temporada</label><select id="mTemp">${TORDER.map(k=>`<option value="${k}"${c.temporada===k?' selected':''}>${TICONS[k]} ${TNAMES[k]}</option>`).join('')}</select></div>
     <div class="form-row"><label>Fecha inicio</label><input type="date" id="mIni" value="${c.inicio}"></div>
     <div class="form-row"><label>Fecha cierre <span style="font-weight:400;text-transform:none">(vacío = en curso)</span></label><input type="date" id="mFin" value="${c.fin||''}"></div>
+    <div class="form-row"><label>Sector / referencia</label><input type="text" id="mSector" placeholder="Ej: Nave 3, P12, 1ª plantación" value="${(c.sector||'').replace(/"/g,'&quot;')}"></div>
     <div class="form-row"><label>Superficie (m²)</label><input type="number" id="mM2" placeholder="Ej: 5000" min="0" value="${c.superficieM2||''}"></div>
     <div class="form-row"><label>Notas</label><input type="text" id="mNot" value="${c.notas||''}"></div>
     <button class="btn btn-primary" onclick="guardarEdicionCiclo('${predioId}','${subjefe}','${cicloId}')">Guardar</button>`;
@@ -1473,12 +1488,13 @@ async function modalEditarCiclo(predioId,subjefe,cicloId){
 }
 async function guardarEdicionCiclo(predioId,subjefe,cicloId){
   const temp=document.getElementById('mTemp').value,ini=document.getElementById('mIni').value,fin=document.getElementById('mFin').value||null,notas=document.getElementById('mNot').value.trim();
+  const sector=document.getElementById('mSector').value.trim();
   const m2=parseInt(document.getElementById('mM2').value)||0;
   if(!ini){toast('⚠️ Fecha de inicio obligatoria');return}
   if(fin&&fin<ini){toast('⚠️ El cierre debe ser posterior al inicio');return}
   loading(true,'Actualizando…');
   try{
-    await colCiclos(predioId,subjefe).doc(cicloId).update({temporada:temp,inicio:ini,fin,notas,superficieM2:m2});
+    await colCiclos(predioId,subjefe).doc(cicloId).update({temporada:temp,inicio:ini,fin,sector,notas,superficieM2:m2});
     closeModal();toast('✅ Ciclo actualizado');
   }catch(e){toast('Error: '+e.message)}
   loading(false);
