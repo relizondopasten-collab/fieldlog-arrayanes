@@ -1125,6 +1125,13 @@ function addLaborRow(){
     </div>
     <div class="lr-cajas-row" style="display:none;margin-top:7px">
       <div><label>N° cajas cosechadas</label><input type="number" class="lr-cajas" placeholder="Ej: 45" min="0"></div>
+    </div>
+    <div class="lr-replantar-row" style="display:none;margin-top:7px">
+      <div style="display:flex;gap:6px">
+        <div><label>Zona</label><select class="lr-zona" style="background:var(--white)"><option value="">—</option><option value="1">Zona 1</option><option value="2">Zona 2</option><option value="3">Zona 3</option></select></div>
+        <div><label>Módulo</label><input type="number" class="lr-modulo" placeholder="Ej: 1" min="1" style="background:var(--white)"></div>
+        <div><label>Plantas</label><input type="number" class="lr-plantas" placeholder="Ej: 50" min="0" style="background:var(--white)"></div>
+      </div>
     </div>`;
   cont.appendChild(row);updateLaborUI();
 }
@@ -1175,6 +1182,23 @@ function onLaborPicked(sel){
     code.style.background='';
   }
   const hint=row.querySelector('.lr-hint');if(hint)hint.style.display='none';
+  // Labor 64 (Replantar) tiene campos especiales: zona, módulo, plantas
+  const isReplantar = parseInt(sel.value) === 64;
+  const laborNumsRows = row.querySelectorAll('.labor-nums');
+  const replantarRow = row.querySelector('.lr-replantar-row');
+  if (replantarRow) {
+    replantarRow.style.display = isReplantar ? 'block' : 'none';
+  }
+  // Mostrar/ocultar filas de labor-nums según si es replantar
+  laborNumsRows.forEach((r,i) => {
+    if (isReplantar) {
+      // Para replantar: mostrar solo la primera fila (Horas), ocultar la segunda (Postura, Evaluación)
+      r.style.display = (i === 0) ? 'block' : 'none';
+    } else {
+      // Para otros labores: mostrar todas las filas
+      r.style.display = 'block';
+    }
+  });
   checkCosecha(sel);
 }
 function rmLaborRow(btn){
@@ -1250,16 +1274,24 @@ function eHTML(e,pred=activePred){
   const laborLines=labores.map((lr,i)=>{
     const elv=recLV(e);
     const l=laborInfo(lr.laborId,elv);
+    // Labor 64 (Replantar) tiene campos diferentes
+    const isReplantar = lr.laborId === 64;
     return `<div style="display:flex;align-items:flex-start;gap:6px;padding:5px 0;${i>0?'border-top:1px solid var(--sand)':''}">
       <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);min-width:18px;margin-top:1px">${i+1}.</span>
       <div style="flex:1">
         <div style="font-size:12px;font-weight:600;line-height:1.3">${l?`<span style="color:var(--muted);font-family:'DM Mono',monospace">${lr.laborId}.${elv<2?'ᵃⁿᵗ':''}</span> ${l.d}`:'—'}</div>
         <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:3px">
           ${lr.horas?`<span class="badge bh">⏱ ${lr.horas}h</span>`:''}
-          ${lr.mesas?`<span class="badge bm">🪴 ${lr.mesas} mesas</span>`:''}
-          ${lr.cajas?`<span class="badge" style="background:#FEE2E2;color:#9F1239">📦 ${lr.cajas} cajas</span>`:''}
-          ${lr.postura?`<span class="badge" style="background:#EDE9FE;color:#5B21B6">📍 Postura ${lr.postura}</span>`:''}
-          ${lr.eval?`<span class="badge" style="${lr.eval===1?'background:#DCFCE7;color:#166534':lr.eval===2?'background:#FEF3C7;color:#92400E':'background:#FEE2E2;color:#9F1239'}">★ ${lr.eval===1?'Muy bien':lr.eval===2?'Bien':'Mal'}</span>`:''}
+          ${isReplantar?`
+            ${lr.zona?`<span class="badge" style="background:#F0FDF4;color:var(--green)">📍 Zona ${lr.zona}</span>`:''}
+            ${lr.modulo?`<span class="badge" style="background:#EDE9FE;color:#5B21B6">📦 Módulo ${lr.modulo}</span>`:''}
+            ${lr.plantas?`<span class="badge" style="background:#FEF3C7;color:#92400E">🌱 ${lr.plantas} plantas</span>`:''}
+          `:`
+            ${lr.mesas?`<span class="badge bm">🪴 ${lr.mesas} mesas</span>`:''}
+            ${lr.cajas?`<span class="badge" style="background:#FEE2E2;color:#9F1239">📦 ${lr.cajas} cajas</span>`:''}
+            ${lr.postura?`<span class="badge" style="background:#EDE9FE;color:#5B21B6">📍 Postura ${lr.postura}</span>`:''}
+            ${lr.eval?`<span class="badge" style="${lr.eval===1?'background:#DCFCE7;color:#166534':lr.eval===2?'background:#FEF3C7;color:#92400E':'background:#FEE2E2;color:#9F1239'}">★ ${lr.eval===1?'Muy bien':lr.eval===2?'Bien':'Mal'}</span>`:''}
+          `}
         </div>
       </div>
     </div>`;
@@ -1315,23 +1347,38 @@ async function guardar(){
     if(ausFin<ausInicio){toast('⚠️ El término debe ser igual o posterior al inicio');return}
   }
   const rows=document.querySelectorAll('#laborRows .labor-row');
-  const labores=[];let hasError=false;
+  const labores=[];let hasError=false;let errorMsg='';
   rows.forEach(row=>{
     const lId=parseInt(row.querySelector('.lr-labor').value)||0;
     const horas=parseFloat(row.querySelector('.lr-horas').value)||0;
-    const mesas=parseInt(row.querySelector('.lr-mesas').value)||0;
-    if(!lId){row.querySelector('.lr-labor').style.borderColor='var(--red)';hasError=true;return}
+    if(!lId){row.querySelector('.lr-labor').style.borderColor='var(--red)';hasError=true;errorMsg='Selecciona labor en cada fila';return}
     row.querySelector('.lr-labor').style.borderColor='';
-    const cajasInput=row.querySelector('.lr-cajas');
-    const cajas=cajasInput?parseInt(cajasInput.value)||0:0;
-    const postura=parseInt(row.querySelector('.lr-postura').value)||null;
-    const evaluacion=parseInt(row.querySelector('.lr-eval').value)||null;
-    labores.push({laborId:lId,horas,mesas,cajas,postura,eval:evaluacion});
+    // Labor 64 (Replantar) tiene estructura diferente
+    if(lId===64){
+      const zona=row.querySelector('.lr-zona').value||'';
+      const modulo=parseInt(row.querySelector('.lr-modulo').value)||0;
+      const plantas=parseInt(row.querySelector('.lr-plantas').value)||0;
+      if(!zona||!modulo||!plantas){
+        if(!zona)row.querySelector('.lr-zona').style.borderColor='var(--red)';
+        if(!modulo)row.querySelector('.lr-modulo').style.borderColor='var(--red)';
+        if(!plantas)row.querySelector('.lr-plantas').style.borderColor='var(--red)';
+        hasError=true;errorMsg='Labor 64 (Replantar): Completa zona, módulo y cantidad de plantas';return;
+      }
+      labores.push({laborId:lId,horas,zona,modulo,plantas});
+    } else {
+      // Labores normales
+      const mesas=parseInt(row.querySelector('.lr-mesas').value)||0;
+      const cajasInput=row.querySelector('.lr-cajas');
+      const cajas=cajasInput?parseInt(cajasInput.value)||0:0;
+      const postura=parseInt(row.querySelector('.lr-postura').value)||null;
+      const evaluacion=parseInt(row.querySelector('.lr-eval').value)||null;
+      labores.push({laborId:lId,horas,mesas,cajas,postura,eval:evaluacion});
+    }
   });
   // Si el trabajador está ausente y no hay reemplazante seleccionado, se omiten labores.
   // Si hay reemplazante, las labores ingresadas corresponden al trabajo realizado por el reemplazante.
   const skipLabores=ausente&&!reemplazoVal;
-  if(!skipLabores&&hasError){toast('⚠️ Selecciona labor en cada fila');return}
+  if(!skipLabores&&hasError){toast('⚠️ '+errorMsg);return}
   if(!skipLabores&&!labores.length){toast('⚠️ Agrega al menos una labor');return}
   let reemplazoPredioId=null,reemplazoWorkerId=null;
   if(ausente&&reemplazoVal){[reemplazoPredioId,reemplazoWorkerId]=reemplazoVal.split('|')}
