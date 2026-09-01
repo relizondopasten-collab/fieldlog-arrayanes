@@ -313,6 +313,16 @@ select:focus,input:focus{border-color:var(--green)}
   <!-- REGISTRO -->
   <div id="screen-registro" class="screen active">
     <div id="ctx0"></div>
+    <!-- navegación de semanas: permite registrar en semanas anteriores -->
+    <div style="display:flex;align-items:center;gap:7px;margin:8px 0 0">
+      <button onclick="regNavSem(-1)" style="background:var(--sand);border:none;border-radius:8px;padding:5px 11px;font-size:15px;cursor:pointer">‹</button>
+      <div style="flex:1;text-align:center">
+        <div id="regSemLabel" style="font-family:'Syne',sans-serif;font-weight:700;font-size:12px"></div>
+        <div id="regSemRange" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)"></div>
+      </div>
+      <button onclick="regNavSem(1)" style="background:var(--sand);border:none;border-radius:8px;padding:5px 11px;font-size:15px;cursor:pointer">›</button>
+      <button onclick="regGoHoy()" style="background:var(--sand);border:none;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer">Hoy</button>
+    </div>
     <div class="sem-grid" id="semGrid"></div>
     <div class="card">
       <div class="card-title">✍️ Nueva Entrada</div>
@@ -685,6 +695,7 @@ const todayIso = today.toISOString().slice(0,10);
 let activePred = 'z1';
 let selDate    = todayIso;
 let progWeekOffset = 0;
+let regWeekOffset  = 0;   // navegación de semanas en Registrar (0 = semana actual, -1 = anterior…)
 
 // In-memory caches (refreshed on predio change / live listeners)
 let wMap       = {z1:[],z2:[],z3:[]};
@@ -729,9 +740,26 @@ function canEditPredio(pid){
 function userSubjefe(){return currentProfile&&currentProfile.subjefe||''}
 
 function weekDates(){
-  const d=new Date(today),dow=d.getDay(),mon=new Date(d);
+  const d=new Date(today);
+  d.setDate(d.getDate()+regWeekOffset*7);
+  const dow=d.getDay(),mon=new Date(d);
   mon.setDate(d.getDate()-(dow===0?6:dow-1));
   return Array.from({length:5},(_,i)=>{const dd=new Date(mon);dd.setDate(mon.getDate()+i);return dd.toISOString().slice(0,10)});
+}
+
+function regNavSem(delta){
+  const curIdx=weekDates().indexOf(selDate);
+  regWeekOffset+=delta;
+  const wd=weekDates();
+  selDate=(regWeekOffset===0&&wd.includes(todayIso))?todayIso:wd[curIdx>=0?curIdx:0];
+  buildSem();renderHoy();renderCtx();
+  if(document.getElementById('screen-avance').classList.contains('active'))renderAvance();
+}
+function regGoHoy(){
+  regWeekOffset=0;
+  const wd=weekDates();
+  selDate=wd.includes(todayIso)?todayIso:wd[0];
+  buildSem();renderHoy();renderCtx();
 }
 
 // ══════════════════════════════════════════════
@@ -1163,7 +1191,11 @@ function updateLaborUI(){
 // ══════════════════════════════════════════════
 function buildSem(){
   const g=document.getElementById('semGrid');if(!g)return;g.innerHTML='';
-  weekDates().forEach((iso,i)=>{
+  const wd=weekDates();
+  const lbl=document.getElementById('regSemLabel'),rng=document.getElementById('regSemRange');
+  if(lbl)lbl.textContent=regWeekOffset===0?'Semana actual':`Semana ${getWeekNum(wd[0])}${regWeekOffset<0?' (anterior)':' (futura)'}`;
+  if(rng)rng.textContent=`${fDMY(wd[0])} → ${fDMY(wd[4])}`;
+  wd.forEach((iso,i)=>{
     const hasD=rCache.some(r=>r.fecha===iso),isA=iso===selDate;
     const b=document.createElement('div');
     b.className=`dib${isA?' active':''}${hasD&&!isA?' has-data':''}`;
