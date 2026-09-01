@@ -608,7 +608,8 @@ const LABORES=[
   {id:61,d:"Sacar grapas"},
   {id:62,d:"Sacar perrera"},
   {id:63,d:"Levantar chicote y amarrarlo"},
-  {id:64,d:"Replantar"}
+  {id:64,d:"Replantar"},
+  {id:65,d:"Sacar brotes de cotiledón"}
 ];
 // Lista antigua (versión 1) — solo para mostrar registros históricos guardados antes del cambio
 const LABORES_V1=[
@@ -1139,6 +1140,20 @@ function checkCosecha(sel){
   const row=sel.closest('.labor-row');
   const cajasRow=row.querySelector('.lr-cajas-row');
   if(cajasRow)cajasRow.style.display=parseInt(sel.value)===ID_COSECHA?'block':'none';
+  checkReplantar(sel);
+}
+
+// Labor 64 (Replantar) tiene campos especiales: zona, módulo, plantas.
+// Se llama tanto al tipear el código como al elegir del listado.
+function checkReplantar(sel){
+  const row=sel.closest('.labor-row');if(!row)return;
+  const isReplantar=parseInt(sel.value)===64;
+  const replantarRow=row.querySelector('.lr-replantar-row');
+  if(replantarRow)replantarRow.style.display=isReplantar?'block':'none';
+  // Para replantar: mostrar solo la primera fila (Horas); ocultar Postura/Evaluación
+  row.querySelectorAll('.labor-nums').forEach((r,i)=>{
+    r.style.display=(isReplantar&&i!==0)?'none':'grid';
+  });
 }
 
 // Cuando tipean un código, auto-seleccionar en el dropdown
@@ -1182,23 +1197,6 @@ function onLaborPicked(sel){
     code.style.background='';
   }
   const hint=row.querySelector('.lr-hint');if(hint)hint.style.display='none';
-  // Labor 64 (Replantar) tiene campos especiales: zona, módulo, plantas
-  const isReplantar = parseInt(sel.value) === 64;
-  const laborNumsRows = row.querySelectorAll('.labor-nums');
-  const replantarRow = row.querySelector('.lr-replantar-row');
-  if (replantarRow) {
-    replantarRow.style.display = isReplantar ? 'block' : 'none';
-  }
-  // Mostrar/ocultar filas de labor-nums según si es replantar
-  laborNumsRows.forEach((r,i) => {
-    if (isReplantar) {
-      // Para replantar: mostrar solo la primera fila (Horas), ocultar la segunda (Postura, Evaluación)
-      r.style.display = (i === 0) ? 'block' : 'none';
-    } else {
-      // Para otros labores: mostrar todas las filas
-      r.style.display = 'block';
-    }
-  });
   checkCosecha(sel);
 }
 function rmLaborRow(btn){
