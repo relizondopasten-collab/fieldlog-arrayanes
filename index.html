@@ -690,6 +690,7 @@ const colUsers    = () => db.collection('arr_users');
 // ══════════════════════════════════════════════
 // APP STATE
 // ══════════════════════════════════════════════
+let progListener = null; // Unsubscribe function for prog real-time listener
 const today    = new Date();
 const todayIso = today.toISOString().slice(0,10);
 let activePred = 'z1';
@@ -1603,56 +1604,63 @@ async function renderProg(){
   const subjefe=document.getElementById('progSubjefe').value;
   const contentDiv=document.getElementById('progContent');
   const newBtnDiv=document.getElementById('progNewBtn');
-  if(!subjefe){contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div>Selecciona un subjefe</div></div>`;newBtnDiv.innerHTML='';return;}
-  // load prog doc
+  if(!subjefe){contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div>Selecciona un subjefe</div></div>`;newBtnDiv.innerHTML='';if(progListener){progListener();progListener=null;}return;}
+
+  // Limpiar listener anterior
+  if(progListener){progListener();progListener=null;}
+
+  // ══ LISTENER EN TIEMPO REAL ══
+  // Se suscribe a cambios en la programación de esta semana y subjefe específico
   loading(true,'Cargando programación…');
-  let prog=null;
-  try{
-    const snap=await colProg(activePred,subjefe).doc(mondayIso).get();
-    if(snap.exists)prog=snap.data();
-  }catch(e){toast('Error: '+e.message)}
-  loading(false);
-  if(!prog){
-    contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div style="margin-bottom:12px">Sin programación para esta semana</div></div>`;
-    newBtnDiv.innerHTML=`<button class="btn btn-primary" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">📋 Crear programación de semana</button>`;
-    return;
-  }
-  newBtnDiv.innerHTML=`<button class="btn btn-secondary" style="margin-top:4px" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">✏️ Editar programación</button>`;
-  contentDiv.innerHTML='';
-  progDays.forEach(dayIso=>{
-    const tasks=(prog.dias||{})[dayIso]||[];
-    const dayName=progDayName(mondayIso,dayIso);
-    const isToday=dayIso===todayIso;
-    let realEntries=rCache.filter(r=>r.fecha===dayIso&&pWs().some(w=>w.id===r.workerId&&w.subjefe===subjefe));
-    const card=document.createElement('div');card.className='prog-day-card';
-    if(isToday)card.style.boxShadow='0 0 0 2px var(--green),0 2px 12px rgba(0,0,0,.10)';
-    const progLV=recLV(prog);
-    let tasksHTML=tasks.length?tasks.map((t,i)=>{
-      const l=laborInfo(t.laborId,progLV);
-      const tNorm=normLaborId(t.laborId,progLV);
-      const realMesas=realEntries.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>normLaborId(lr.laborId,recLV(e))===tNorm).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
-      const pct=t.metaMesas>0?Math.min(100,Math.round(realMesas/t.metaMesas*100)):null;
-      const bc=pct===null?'var(--green)':pct>=100?'var(--c-primor)':pct>=60?'#F4A261':'var(--red)';
-      return `<div class="prog-task">
-        <div class="prog-task-num">${i+1}.</div>
-        <div class="prog-task-info">
-          <div class="prog-task-labor">${l?`<span style="color:var(--muted);font-family:'DM Mono',monospace">${t.laborId}.</span> ${l.d}`:'—'}</div>
-          <div class="prog-task-meta">
-            <span class="prog-tag ptag-mod">📍 ${t.postura?'Postura '+t.postura:(t.modulo?'Módulo '+t.modulo:'—')}</span>
-            ${t.metaMesas?`<span class="prog-tag ptag-meta">🎯 ${t.metaMesas} mesas</span>`:''}
-            ${realMesas?`<span class="prog-tag ptag-real">✅ ${realMesas} real</span>`:''}
+  progListener=colProg(activePred,subjefe).doc(mondayIso).onSnapshot(snap=>{
+    loading(false);
+    const prog=snap.exists?snap.data():null;
+
+    if(!prog){
+      contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div style="margin-bottom:12px">Sin programación para esta semana</div></div>`;
+      newBtnDiv.innerHTML=`<button class="btn btn-primary" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">📋 Crear programación de semana</button>`;
+      return;
+    }
+    newBtnDiv.innerHTML=`<button class="btn btn-secondary" style="margin-top:4px" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">✏️ Editar programación</button>`;
+    contentDiv.innerHTML='';
+    progDays.forEach(dayIso=>{
+      const tasks=(prog.dias||{})[dayIso]||[];
+      const dayName=progDayName(mondayIso,dayIso);
+      const isToday=dayIso===todayIso;
+      let realEntries=rCache.filter(r=>r.fecha===dayIso&&pWs().some(w=>w.id===r.workerId&&w.subjefe===subjefe));
+      const card=document.createElement('div');card.className='prog-day-card';
+      if(isToday)card.style.boxShadow='0 0 0 2px var(--green),0 2px 12px rgba(0,0,0,.10)';
+      const progLV=recLV(prog);
+      let tasksHTML=tasks.length?tasks.map((t,i)=>{
+        const l=laborInfo(t.laborId,progLV);
+        const tNorm=normLaborId(t.laborId,progLV);
+        const realMesas=realEntries.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>normLaborId(lr.laborId,recLV(e))===tNorm).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
+        const pct=t.metaMesas>0?Math.min(100,Math.round(realMesas/t.metaMesas*100)):null;
+        const bc=pct===null?'var(--green)':pct>=100?'var(--c-primor)':pct>=60?'#F4A261':'var(--red)';
+        return `<div class="prog-task">
+          <div class="prog-task-num">${i+1}.</div>
+          <div class="prog-task-info">
+            <div class="prog-task-labor">${l?`<span style="color:var(--muted);font-family:'DM Mono',monospace">${t.laborId}.</span> ${l.d}`:'—'}</div>
+            <div class="prog-task-meta">
+              <span class="prog-tag ptag-mod">📍 ${t.postura?'Postura '+t.postura:(t.modulo?'Módulo '+t.modulo:'—')}</span>
+              ${t.metaMesas?`<span class="prog-tag ptag-meta">🎯 ${t.metaMesas} mesas</span>`:''}
+              ${realMesas?`<span class="prog-tag ptag-real">✅ ${realMesas} real</span>`:''}
+            </div>
+            ${t.metaMesas&&pct!==null?`<div class="prog-vs"><span class="prog-vs-label">Avance</span><div class="prog-vs-bar-wrap"><div class="prog-vs-bar" style="width:${pct}%;background:${bc}"></div></div><span class="prog-vs-pct" style="color:${bc}">${pct}%</span></div>`:''}
+            ${t.notas?`<div style="font-size:11px;color:var(--muted);margin-top:4px">📌 ${t.notas}</div>`:''}
           </div>
-          ${t.metaMesas&&pct!==null?`<div class="prog-vs"><span class="prog-vs-label">Avance</span><div class="prog-vs-bar-wrap"><div class="prog-vs-bar" style="width:${pct}%;background:${bc}"></div></div><span class="prog-vs-pct" style="color:${bc}">${pct}%</span></div>`:''}
-          ${t.notas?`<div style="font-size:11px;color:var(--muted);margin-top:4px">📌 ${t.notas}</div>`:''}
-        </div>
-      </div>`;
-    }).join(''):`<div class="prog-empty-day">Sin tareas programadas</div>`;
-    card.innerHTML=`<div class="prog-day-hdr">
-      <div><div class="prog-day-name">${dayName}${isToday?' <span style="font-size:9px;background:var(--green);color:#fff;padding:1px 6px;border-radius:10px;vertical-align:middle">Hoy</span>':''}</div>
-      <div class="prog-day-date">${fDMY(dayIso)}</div></div>
-      ${tasks.length?`<span class="badge" style="background:var(--sand);color:var(--dark)">${tasks.length} tarea${tasks.length>1?'s':''}</span>`:''}
-    </div><div class="prog-day-body">${tasksHTML}</div>`;
-    contentDiv.appendChild(card);
+        </div>`;
+      }).join(''):`<div class="prog-empty-day">Sin tareas programadas</div>`;
+      card.innerHTML=`<div class="prog-day-hdr">
+        <div><div class="prog-day-name">${dayName}${isToday?' <span style="font-size:9px;background:var(--green);color:#fff;padding:1px 6px;border-radius:10px;vertical-align:middle">Hoy</span>':''}</div>
+        <div class="prog-day-date">${fDMY(dayIso)}</div></div>
+        ${tasks.length?`<span class="badge" style="background:var(--sand);color:var(--dark)">${tasks.length} tarea${tasks.length>1?'s':''}</span>`:''}
+      </div><div class="prog-day-body">${tasksHTML}</div>`;
+      contentDiv.appendChild(card);
+    });
+  },err=>{
+    loading(false);
+    toast('Error escuchando cambios: '+err.message);
   });
 }
 
@@ -1963,9 +1971,6 @@ async function guardarEdicionUsuario(uid){
 // ══════════════════════════════════════════════
 function closeModal(){document.getElementById('overlay').classList.remove('open')}
 
-// ══════════════════════════════════════════════
-// SCREEN SWITCHER
-// ══════════════════════════════════════════════
 // ══════════════════════════════════════════════
 // INFORMES (admin)
 // ══════════════════════════════════════════════
@@ -2385,6 +2390,8 @@ function showScr(name,btn){
   if(name==='config')  renderConfig();
   if(name==='prog')    {populateProgSubjefe();renderProg();}
   if(name==='informes'){initInformes();}
+  // Limpiar listener de programación al salir de esa pantalla
+  if(name!=='prog'&&progListener){progListener();progListener=null;}
 }
 </script>
 </body>
