@@ -29,6 +29,48 @@ const FIREBASE_CONFIG = {
 };
 </script>
 
+<!-- ══════════════════════════════════════════
+     CONTROL DE VERSIÓN / ACTUALIZACIÓN
+     ⚠️ Al subir cambios: cambiar APP_V AQUÍ **y**
+     poner el mismo valor en el archivo version.json
+══════════════════════════════════════════ -->
+<script>
+const APP_V = '2026-09-04-1';
+
+function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
+
+async function checkUpdate(manual){
+  try{
+    const r = await fetch('version.json?t=' + Date.now(), {cache:'no-store'});
+    if(!r.ok) throw new Error('http ' + r.status);
+    const j = await r.json();
+    if(j.v && j.v !== APP_V){
+      // Anti-bucle: si ya intentamos actualizar a esta versión en esta sesión, no insistir
+      if(sessionStorage.getItem('fl_upd') === j.v){
+        if(manual) flAviso('No se pudo actualizar sola. Cierra la app y ábrela de nuevo.');
+        return false;
+      }
+      sessionStorage.setItem('fl_upd', j.v);
+      if(manual) flAviso('Actualizando a la versión ' + j.v + '…');
+      location.replace(location.pathname + '?v=' + encodeURIComponent(j.v));
+      return true;
+    }
+    sessionStorage.removeItem('fl_upd');
+    if(manual) flAviso('✅ Ya tienes la última versión (' + APP_V + ')');
+    return false;
+  }catch(e){
+    if(manual) flAviso('Sin conexión para verificar. Versión instalada: ' + APP_V);
+    return false;
+  }
+}
+
+window.addEventListener('load', ()=>{
+  const el = document.getElementById('appVerLbl');
+  if(el) el.textContent = APP_V;
+  setTimeout(()=>checkUpdate(false), 1500);
+});
+</script>
+
 <!-- Firebase SDKs -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -515,6 +557,11 @@ select:focus,input:focus{border-color:var(--green)}
       <div class="card-title">⚠️ Datos</div>
       <button class="btn btn-danger" id="clearDataBtn" onclick="if(confirm('¿Borrar registros del predio activo?'))clearData()" style="margin-bottom:7px">Borrar registros del predio activo</button>
       <p style="font-size:11px;color:var(--muted)">Trabajadores y ciclos no se borran.</p>
+    </div>
+    <div class="card">
+      <div class="card-title">ℹ️ Versión de la app</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5">Versión instalada: <b id="appVerLbl" style="color:var(--text)">—</b><br>Si alguien no ve una función nueva, que abra esta pantalla y toque el botón.</p>
+      <button class="btn btn-primary" onclick="checkUpdate(true)">Buscar actualización</button>
     </div>
   </div>
 </div><!-- end appScreen -->
