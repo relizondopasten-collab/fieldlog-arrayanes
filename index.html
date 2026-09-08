@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-04-1';
+const APP_V = '2026-09-08-1';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -478,6 +478,7 @@ select:focus,input:focus{border-color:var(--green)}
         <button class="btn btn-secondary" onclick="generarInforme('ausencias')" style="font-size:11px;padding:8px;grid-column:span 2">🏥 Ausencias, licencias y vacaciones</button>
       </div>
       <button class="btn btn-primary" onclick="renderInfCharts()" style="margin-top:10px;background:var(--dark)">📊 Ver gráficos del periodo</button>
+      <button class="btn btn-primary" onclick="generarDashboard()" style="margin-top:6px">📈 Descargar dashboard (HTML)</button>
       <div id="infMsg" style="margin-top:10px;font-size:11px;color:var(--muted)"></div>
     </div>
     <div id="infCharts"></div>
@@ -656,7 +657,8 @@ const LABORES=[
   {id:62,d:"Sacar perrera"},
   {id:63,d:"Levantar chicote y amarrarlo"},
   {id:64,d:"Replantar"},
-  {id:65,d:"Sacar brotes de cotiledón"}
+  {id:65,d:"Sacar brotes de cotiledón"},
+  {id:66,d:"Retiro de pétalos de frutos"}
 ];
 // Lista antigua (versión 1) — solo para mostrar registros históricos guardados antes del cambio
 const LABORES_V1=[
@@ -781,7 +783,11 @@ function isAdmin(){return currentProfile&&currentProfile.role==='admin'}
 // a otras zonas ni a administración (usuarios, informes, trabajadores, costos)
 function isJefe(){return currentProfile&&currentProfile.role==='jefe'}
 // ¿Puede ver todos los subjefes del predio activo? (admin y jefe de zona sí; subjefe no)
-function veTodoPredio(){return isAdmin()||isJefe()}
+// Desde 2026-09-08 (pedido de Rafael): jefes y subjefes tienen los mismos permisos
+// de visualización que los administradores — ven las 3 zonas, todos los subjefes
+// y los informes. Solo queda reservado a admin: usuarios del sistema, costo de
+// jornada y el borrado masivo de registros.
+function veTodoPredio(){return true}
 const ROLE_LABEL={admin:'Admin',jefe:'Jefe de zona',subjefe:'Subjefe'};
 function canEditPredio(pid){
   if(isAdmin())return true;
@@ -916,30 +922,22 @@ async function saveCfgCosto(){
 }
 
 function applyRoleUI(){
-  // Predio tabs: subjefes only see their predio
-  document.querySelectorAll('.ptab').forEach(tab=>{
-    if(!isAdmin()&&tab.dataset.id!==currentProfile.predioId){
-      tab.classList.add('disabled');
-    }
-  });
-  // Config: show users section only for admin
+  // Todos los roles ven las 3 zonas y los informes (permisos igualados).
+  // Solo queda reservado a admin: usuarios del sistema, costo jornada y borrado masivo.
   document.getElementById('usersAdminSection').style.display=isAdmin()?'block':'none';
   document.getElementById('costCard').style.display=isAdmin()?'block':'none';
   document.getElementById('clearDataBtn').style.display=isAdmin()?'block':'none';
-  // Add worker button: only admin
-  document.getElementById('addWBtn').style.display=isAdmin()?'block':'none';
-  // Informes tab: only admin
-  document.getElementById('navInformes').style.display=isAdmin()?'inline-flex':'none';
+  document.getElementById('addWBtn').style.display='block';
+  document.getElementById('navInformes').style.display='inline-flex';
 }
 
 // ══════════════════════════════════════════════
 // PREDIO SELECT + DATA LOAD
 // ══════════════════════════════════════════════
 function selPredio(id){
-  if(!isAdmin()&&currentProfile.predioId!==id)return;
   activePred=id;
   document.querySelectorAll('.ptab').forEach(t=>{
-    t.className='ptab'+(isAdmin()||currentProfile.predioId===t.dataset.id?'':' disabled');
+    t.className='ptab';
     if(t.dataset.id===id)t.classList.add('ptab-'+{z1:'z1',z2:'z2',z3:'z3'}[id]);
   });
   loadPredioData(id);
@@ -973,7 +971,7 @@ async function loadPredioData(pid){
     // hay que suscribirse a todas (antes solo se escuchaba la zona activa y los
     // ciclos creados para otras zonas no aparecían en pantalla).
     ciclosCache={};
-    const predsToWatch=isAdmin()?PRED_ORDER:[pid];
+    const predsToWatch=PRED_ORDER;   // todos ven los ciclos de las 3 zonas
     for(const cpid of predsToWatch){
       for(const sub of PREDIOS[cpid].subjefes){
         const key=cpid+'|'+sub;
@@ -1511,7 +1509,7 @@ function renderCiclos(){
   const showAll=isAdmin();
   const subjefes=showAll?pD().subjefes:pD().subjefes.filter(s=>s===userSubjefe()||isAdmin());
   PRED_ORDER.forEach(pid=>{
-    if(!isAdmin()&&pid!==activePred)return;
+    // todos ven los ciclos de las 3 zonas
     const p=PREDIOS[pid],pc={z1:'z1',z2:'z2',z3:'z3'}[pid];
     const pl=document.createElement('div');pl.className='pred-label';
     pl.innerHTML=`<div class="pred-label-dot" style="background:var(--c-${pc})"></div><span class="pred-label-name" style="color:var(--c-${pc})">${p.nombre}</span>`;
@@ -1541,7 +1539,7 @@ function renderCiclos(){
             <div class="ci-actions">
               ${isOpen?`<button class="btn btn-warn btn-sm" onclick="modalCerrarCiclo('${pid}','${sub}','${c.id}')">🔒 Cerrar</button>`:''}
               <button class="btn btn-secondary btn-sm" onclick="modalEditarCiclo('${pid}','${sub}','${c.id}')">✏️</button>
-              ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="borrarCiclo('${pid}','${sub}','${c.id}')">✕</button>`:''}
+              <button class="btn btn-danger btn-sm" onclick="borrarCiclo('${pid}','${sub}','${c.id}')">✕</button>
             </div>
           </div>
           ${c.notas?`<div class="ci-notes">📌 ${c.notas}</div>`:''}`;
@@ -1849,7 +1847,7 @@ async function renderConfig(){
     ?sortWs(wMap[activePred]).map(w=>`<div class="wrow">
         <div><div class="wn">${wDisplay(w)}</div><div class="wm">${w.codigo||'—'} · ${w.subjefe}${w.plantas?` · ${w.plantas}pl`:''}</div></div>
         <div style="display:flex;gap:4px;flex-shrink:0">
-          ${isAdmin()?`<button class="btn btn-secondary btn-sm" onclick="modalEditarW('${w.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="delW('${w.id}')">✕</button>`:''}
+          <button class="btn btn-secondary btn-sm" onclick="modalEditarW('${w.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="delW('${w.id}')">✕</button>
         </div>
       </div>`).join('')
     :`<div class="empty"><div style="padding:8px 0;font-size:12px">Sin trabajadores</div></div>`;
@@ -1869,7 +1867,6 @@ async function renderConfig(){
 }
 
 async function addW(){
-  if(!isAdmin()){toast('Solo el administrador puede agregar trabajadores');return}
   const nom=document.getElementById('nN').value.trim(),ape=document.getElementById('nA').value.trim();
   const c=document.getElementById('nC').value.trim(),s=document.getElementById('nS').value,p=parseInt(document.getElementById('nP').value)||0;
   if(!nom||!ape){toast('⚠️ Ingresa nombres y apellidos');return}
@@ -1902,7 +1899,6 @@ function modalEditarW(id){
   document.getElementById('overlay').classList.add('open');
 }
 async function guardarEdicionW(id){
-  if(!isAdmin()){toast('Solo admin puede editar');return}
   const nom=document.getElementById('ewN').value.trim(),ape=document.getElementById('ewA').value.trim();
   const c=document.getElementById('ewC').value.trim(),s=document.getElementById('ewS').value,p=parseInt(document.getElementById('ewP').value)||0;
   if(!nom||!ape){toast('⚠️ Ingresa nombres y apellidos');return}
@@ -1916,7 +1912,6 @@ async function guardarEdicionW(id){
   loading(false);
 }
 async function delW(id){
-  if(!isAdmin()){toast('Solo admin puede eliminar');return}
   if(!confirm('¿Eliminar trabajador?'))return;
   loading(true,'Eliminando…');
   try{
@@ -2438,6 +2433,107 @@ function barRow(label,value,maxV,txt,color){
   </div>`;
 }
 function capColor(p){return p>=75?'var(--green)':p>=50?'#F4A261':'var(--red)'}
+// ── DASHBOARD DESCARGABLE ──
+// Genera un archivo HTML autónomo (sin dependencias, funciona sin internet) con
+// KPIs, gráficos de barras y tablas del periodo seleccionado. Se puede abrir en
+// cualquier navegador y compartir por WhatsApp o correo.
+function dbEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+function dbBar(label,txt,pct,color){
+  return `<div class="brow"><div class="bl"><span class="bn">${dbEsc(label)}</span><span class="bv">${dbEsc(txt)}</span></div><div class="bt"><div class="bf" style="width:${Math.max(2,Math.min(100,Math.round(pct)))}%;background:${color}"></div></div></div>`;
+}
+async function generarDashboard(){
+  const f=getInfFiltros();if(!f)return;
+  const msg=document.getElementById('infMsg');msg.textContent='⏳ Generando dashboard…';
+  try{
+    const regs=filtrarRegistros(f);
+    const ws=pWs();
+    if(!regs.length){msg.textContent='⚠️ No hay datos en el rango seleccionado';return}
+    const hj=cfgGlobal.horasJornada||8;
+    // KPIs
+    let horas=0,mesas=0,cajas=0;const trabAct=new Set();let nAus=0;
+    regs.forEach(r=>{
+      if(r.ausente){nAus++;return}
+      trabAct.add(r.workerId);
+      (r.labores||[]).forEach(l=>{horas+=l.horas||0;mesas+=l.mesas||0;cajas+=l.cajas||0});
+    });
+    const costo=costoDeHoras(horas);
+    // Horas y costo por encargado
+    const bySub={};
+    regs.forEach(r=>{if(r.ausente)return;const w=ws.find(x=>x.id===r.workerId);if(!w)return;(r.labores||[]).forEach(l=>{bySub[w.subjefe]=(bySub[w.subjefe]||0)+(l.horas||0)})});
+    const subs=Object.entries(bySub).sort((a,b)=>b[1]-a[1]);
+    const maxSubH=Math.max(1,...subs.map(s=>s[1]));
+    // Labores con más horas (agrupación normalizada v1→v2)
+    const byLab={};
+    regs.forEach(r=>{if(r.ausente)return;const lv=recLV(r);(r.labores||[]).forEach(l=>{
+      const nid=normLaborId(l.laborId,lv);
+      const lab=(typeof nid==='number')?LABORES.find(x=>x.id===nid):LABORES_V1.find(x=>x.id===Number(String(nid).slice(3)));
+      const k=(typeof nid==='number'?nid+'. ':'ant. ')+(lab?lab.d:'#'+l.laborId);
+      byLab[k]=(byLab[k]||0)+(l.horas||0);
+    })});
+    const labsTop=Object.entries(byLab).sort((a,b)=>b[1]-a[1]).slice(0,12);
+    const maxLabH=Math.max(1,...labsTop.map(x=>x[1]));
+    // Capacidades (evaluaciones)
+    const {porTrab,porLabor}=collectEvals(regs,ws);
+    const trab=Object.values(porTrab).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
+    const labsCap=Object.values(porLabor).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
+    // Ausencias por motivo
+    const ausCnt={};
+    regs.filter(r=>r.ausente).forEach(r=>{const t=tipoAusenciaDe(r);ausCnt[t]=(ausCnt[t]||0)+1});
+    const maxAus=Math.max(1,...Object.values(ausCnt));
+    // Tablas (reutiliza los constructores de los informes Excel)
+    const tTrab=buildSheetTrabajadores(regs,ws);
+    const tEnc=buildSheetEncargados(regs,ws);
+    const tabla=rows=>`<div class="twrap"><table><thead><tr>${rows[0].map(h=>`<th>${dbEsc(h)}</th>`).join('')}</tr></thead><tbody>${rows.slice(1).map(r=>`<tr>${r.map(c=>`<td>${dbEsc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    const capColorHex=p=>p>=75?'#2D6A4F':p>=50?'#F4A261':'#D62828';
+    const kpi=(v,l)=>`<div class="kpi"><div class="kv">${v}</div><div class="kl">${l}</div></div>`;
+    const AUS_TXT={sin:'Sin justificación',justificada:'Justificada',licencia:'Licencia médica',vacaciones:'Vacaciones',retiro:'Retiro'};
+
+    const html='<!DOCTYPE html>'+`<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard FieldLog ${f.desde} a ${f.hasta}</title>
+<style>
+body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#F8F5EF;color:#2A2A2A;margin:0;padding:0 0 40px}
+.hdr{background:#1A2E1F;color:#B7E4C7;padding:22px 18px}
+.hdr h1{margin:0;font-size:20px}.hdr p{margin:5px 0 0;font-size:12px;color:#74C69D}
+.wrap{max-width:900px;margin:0 auto;padding:0 14px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:14px 0}
+.kpi{background:#fff;border-radius:12px;padding:12px 8px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.kv{font-size:19px;font-weight:800;color:#1A2E1F}.kl{font-size:10px;color:#7A7A7A;text-transform:uppercase;margin-top:3px}
+.card{background:#fff;border-radius:14px;padding:14px;margin:12px 0;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.card h2{font-size:13px;margin:0 0 10px;color:#1A2E1F;text-transform:uppercase;letter-spacing:.5px}
+.brow{margin-bottom:8px}.bl{display:flex;justify-content:space-between;gap:8px;font-size:12px}
+.bn{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bv{color:#7A7A7A;font-size:11px;flex-shrink:0}
+.bt{height:8px;background:#E9E3D7;border-radius:4px;overflow:hidden;margin-top:3px}.bf{height:100%;border-radius:4px}
+.twrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:11px}
+th{text-align:left;padding:6px;border-bottom:2px solid #E9E3D7;font-size:10px;color:#7A7A7A;text-transform:uppercase}
+td{padding:5px 6px;border-bottom:1px solid #E9E3D7}
+.note{font-size:11px;color:#7A7A7A;margin:4px 0 0}
+</style></head><body>
+<div class="hdr"><h1>🌱 FieldLog · Los Arrayanes — Dashboard de labores</h1>
+<p>${dbEsc(pD().nombre)} · ${fD(f.desde)} → ${fD(f.hasta)}${f.subjefe?' · Subjefe: '+dbEsc(f.subjefe):''} · Generado ${new Date().toLocaleString('es-CL')}</p></div>
+<div class="wrap">
+<div class="kpis">
+${kpi(regs.length,'Registros')}${kpi(trabAct.size,'Trabajadores')}${kpi(horas.toFixed(1),'Horas')}${kpi((horas/hj).toFixed(1),'Jornadas')}${kpi(mesas,'Mesas')}${kpi(cajas,'Cajas')}${kpi(fmtCLP(costo),'Costo')}${kpi(nAus,'Ausencias')}
+</div>
+${cfgGlobal.costoJornada?'':'<p class="note">ℹ️ Costo jornada no configurado en la app: los costos se muestran en $0.</p>'}
+<div class="card"><h2>⏱ Horas y costo por encargado</h2>${subs.length?subs.map(([s,h])=>dbBar('👤 '+s,h.toFixed(1)+' h · '+fmtCLP(costoDeHoras(h)),h/maxSubH*100,'#40916C')).join(''):'<p class="note">Sin datos</p>'}</div>
+<div class="card"><h2>🌱 Labores con más horas</h2>${labsTop.length?labsTop.map(([k,h])=>dbBar(k,h.toFixed(1)+' h',h/maxLabH*100,'#74C69D')).join(''):'<p class="note">Sin datos</p>'}</div>
+<div class="card"><h2>🏆 Capacidad por trabajador</h2><p class="note" style="margin:0 0 8px">Según evaluaciones 1 (muy bien) · 2 (bien) · 3 (mal). 100% = todas «muy bien».</p>${trab.length?trab.map(m=>dbBar(m.nombre,m.pct+'% · '+m.n+' eval. · prom. '+m.avg.toFixed(2),m.pct,capColorHex(m.pct))).join(''):'<p class="note">Sin labores evaluadas en el periodo</p>'}</div>
+<div class="card"><h2>🎯 Capacidad por labor</h2>${labsCap.length?labsCap.map(m=>dbBar(m.code+'. '+m.desc,m.pct+'% · '+m.n+' eval.',m.pct,capColorHex(m.pct))).join(''):'<p class="note">Sin labores evaluadas en el periodo</p>'}</div>
+<div class="card"><h2>🏥 Ausencias por motivo</h2>${Object.keys(ausCnt).length?Object.entries(ausCnt).sort((a,b)=>b[1]-a[1]).map(([t,n])=>dbBar(AUS_TXT[t]||t,n+' registro'+(n>1?'s':''),n/maxAus*100,'#B45309')).join(''):'<p class="note">Sin ausencias en el periodo</p>'}</div>
+<div class="card"><h2>👤 Detalle por trabajador</h2>${tabla(tTrab)}</div>
+<div class="card"><h2>👨‍🌾 Detalle por encargado (horas, jornadas y costo)</h2>${tabla(tEnc)}</div>
+</div></body></html>`;
+
+    const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`Arrayanes_Dashboard_${f.desde}_a_${f.hasta}.html`;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    msg.textContent='✅ Dashboard descargado. Se abre en cualquier navegador y se puede compartir por WhatsApp o correo.';
+  }catch(e){msg.textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+
 function renderInfCharts(){
   const f=getInfFiltros();if(!f)return;
   const regs=filtrarRegistros(f);
