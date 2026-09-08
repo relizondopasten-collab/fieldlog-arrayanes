@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-08-1';
+const APP_V = '2026-09-08-2';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -1080,6 +1080,8 @@ function filtW(){
       `<option value="otro|otro">Otro (externo)</option>`+
       `<option value="sin|sin">Sin reemplazo disponible</option>`;
   }
+  // refresca la lista de "sin registro este día" cuando cambia el filtro de subjefe
+  renderHoy();
 }
 
 // ── Tipos de ausencia ──
@@ -1279,11 +1281,31 @@ function buildSem(){
 // ══════════════════════════════════════════════
 function renderHoy(){
   const div=document.getElementById('hoy');if(!div)return;
-  // filter by date; if subjefe, also by their group
   let entries=rCache.filter(r=>r.fecha===selDate);
-  if(!veTodoPredio()){const sub=userSubjefe();entries=entries.filter(r=>{const w=pWs().find(x=>x.id===r.workerId);return w&&w.subjefe===sub});}
-  if(!entries.length){div.innerHTML=`<div class="empty"><div class="empty-icon">📝</div><div>Sin entradas para este día</div></div>`;return}
-  div.innerHTML=entries.map(e=>eHTML(e)).join('');
+
+  // ── Trabajadores SIN registro en el día seleccionado ──
+  // Permite revisar de un vistazo a quién falta ingresarle labores (o ausencia).
+  // Si hay un subjefe elegido en el filtro, muestra solo los pendientes de su grupo.
+  const subSel=(document.getElementById('selSub')||{}).value||'';
+  const conRegistro=new Set(entries.map(r=>r.workerId));
+  let pend=pWs().filter(w=>!conRegistro.has(w.id));
+  if(subSel)pend=pend.filter(w=>w.subjefe===subSel);
+  pend=sortWs(pend);
+  const grupoTxt=subSel?` (grupo ${subSel})`:'';
+  const pendHTML=pend.length
+    ?`<div class="card" style="padding:11px 14px;border-left:4px solid #F4A261">
+        <div class="card-title" style="margin-bottom:7px">📋 Sin registro este día${grupoTxt}: ${pend.length}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">${pend.map(w=>`<span class="badge" style="background:#FEF3C7;color:#92400E">${wDisplay(w)}</span>`).join('')}</div>
+        <p style="font-size:10px;color:var(--muted);margin:7px 0 0">Regístrales sus labores, o márcalos como ausentes si no vinieron.</p>
+      </div>`
+    :`<div class="card" style="padding:10px 14px;border-left:4px solid var(--green)">
+        <div style="font-size:12px;color:var(--green);font-weight:600">✅ Todos los trabajadores${grupoTxt} tienen registro este día</div>
+      </div>`;
+
+  const entriesHTML=entries.length
+    ?entries.map(e=>eHTML(e)).join('')
+    :`<div class="empty"><div class="empty-icon">📝</div><div>Sin entradas para este día</div></div>`;
+  div.innerHTML=pendHTML+entriesHTML;
 }
 
 function eHTML(e,pred=activePred){
