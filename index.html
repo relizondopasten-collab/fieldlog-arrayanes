@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-10-4';
+const APP_V = '2026-09-10-5';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -1008,6 +1008,9 @@ async function loadPredioData(pid){
     populateSels();
     renderCtx();
     buildSem();
+    // Si el usuario cambia de zona estando dentro de Config, refrescar la pantalla
+    // completa (lista de trabajadores, títulos y selector de subjefe de la zona nueva)
+    if(document.getElementById('screen-config').classList.contains('active'))renderConfig();
   }catch(e){
     loading(false);
     toast('Error cargando datos: '+e.message);
