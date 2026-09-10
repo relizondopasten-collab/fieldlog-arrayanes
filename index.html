@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-10-1';
+const APP_V = '2026-09-10-4';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -370,6 +370,11 @@ select:focus,input:focus{border-color:var(--green)}
       <div class="card-title">✍️ Nueva Entrada</div>
       <div class="form-row"><label>Subjefe / Encargado</label><select id="selSub" onchange="filtW()"><option value="">Todos</option></select></div>
       <div class="form-row"><label>Trabajador</label><select id="selW" onchange="checkAusente()"><option value="">— Seleccionar —</option></select></div>
+      <!-- Época/ciclo: aparece solo cuando hay 2+ ciclos vigentes en la zona (ej. invierno + primor) -->
+      <div class="form-row" id="cicloSelDiv" style="display:none">
+        <label>Época / ciclo de esta labor</label>
+        <select id="selCiclo"><option value="">— Elegir época —</option></select>
+      </div>
       <div id="ausenteSection" style="display:none;background:var(--cream);border:1.5px solid var(--sand);border-radius:11px;padding:10px 12px;margin-bottom:9px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="chkAusente" onchange="onChkAusente()" style="width:16px;height:16px;accent-color:var(--red);cursor:pointer"><label for="chkAusente" style="font-size:12px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:.3px;margin:0;cursor:pointer">Trabajador ausente</label></div>
         <div id="tipoAusenciaDiv" style="display:none">
@@ -508,6 +513,12 @@ select:focus,input:focus{border-color:var(--green)}
       </div>
       <div class="form-row"><label>N° plantas</label><input type="number" id="nP" placeholder="1500" min="0"></div>
       <button class="btn btn-primary" id="addWBtn" onclick="addW()">Agregar trabajador</button>
+      <!-- carga masiva: pegar la dotación completa de un sector -->
+      <div class="sec-div">Agregar varios (pegar lista)</div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Pega la lista de la dotación, <b>una persona por línea</b> (Nombre Apellidos). Se crean todos en la zona activa, asignados al subjefe elegido. Después puedes ajustar código o plantas con ✏️.</p>
+      <div class="form-row"><textarea id="bulkW" rows="6" placeholder="Juan Mendoza&#10;Miguelina Arancibia&#10;Francisco Leiva Núñez&#10;…" style="width:100%;background:var(--cream);border:1.5px solid var(--sand);border-radius:10px;padding:10px 11px;font-size:13px;font-family:'Inter',sans-serif;color:var(--text);outline:none;resize:vertical"></textarea></div>
+      <div class="form-row"><label>Subjefe para toda la lista</label><select id="bkS"></select></div>
+      <button class="btn btn-secondary" onclick="addWBulk()">＋ Agregar toda la lista</button>
     </div>
     <!-- usuarios del sistema (solo admin) -->
     <div id="usersAdminSection" style="display:none">
@@ -721,6 +732,10 @@ function wDisplay(w){
   return s.apellidos+', '+s.nombres;
 }
 function sortWs(list){return (list||[]).slice().sort((a,b)=>wDisplay(a).localeCompare(wDisplay(b),'es',{sensitivity:'base'}))}
+// Trabajadores inactivos (activo:false): no aparecen en selectores, pendientes ni conteos,
+// pero se conservan para que los registros e informes históricos muestren su nombre.
+function esActivo(w){return w.activo!==false}
+function wActivos(list){return (list||[]).filter(esActivo)}
 
 // ══════════════════════════════════════════════
 // FIREBASE INIT
@@ -1045,7 +1060,28 @@ function ctxHTML(){
     </div>${rows}
   </div>`;
 }
-function renderCtx(){['ctx0','ctx2','ctx-prog'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=ctxHTML()})}
+function renderCtx(){['ctx0','ctx2','ctx-prog'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=ctxHTML()});updateCicloSel();}
+
+// ── Selector de época/ciclo al registrar ──
+// Cuando la zona tiene 2+ ciclos vigentes en la fecha (ej. invierno + primor),
+// aparece un selector para indicar a cuál época pertenece la labor registrada.
+function subjefeParaCiclos(){
+  const selWEl=document.getElementById('selW');
+  const wId=selWEl?selWEl.value:'';
+  const w=wId?pWs().find(x=>x.id===wId):null;
+  return (w&&w.subjefe)||pD().subjefes[0];
+}
+function cicloLabel(c){return `${TICONS[c.temporada]} ${TNAMES[c.temporada]}${c.sector?' · '+c.sector:''} (desde ${fDMY(c.inicio)})`}
+function updateCicloSel(){
+  const div=document.getElementById('cicloSelDiv');if(!div)return;
+  const sel=document.getElementById('selCiclo');
+  const cs=getCiclosEn(activePred,subjefeParaCiclos(),selDate);
+  if(cs.length<2){div.style.display='none';sel.innerHTML='<option value=""></option>';return}
+  const cur=sel.value;
+  sel.innerHTML='<option value="">— Elegir época —</option>'+cs.map(c=>`<option value="${c.id}">${cicloLabel(c)}</option>`).join('');
+  if(cur&&cs.some(c=>c.id===cur))sel.value=cur;
+  div.style.display='block';
+}
 
 // ══════════════════════════════════════════════
 // POPULATE SELECTS
@@ -1062,6 +1098,8 @@ function populateSels(){
   });
   const ns=document.getElementById('nS');
   if(ns)ns.innerHTML=p.subjefes.map(s=>`<option>${s}</option>`).join('');
+  const bks=document.getElementById('bkS');
+  if(bks)bks.innerHTML=p.subjefes.map(s=>`<option>${s}</option>`).join('');
   ['fL'].forEach(sid=>{const sel=document.getElementById(sid);if(!sel)return;sel.innerHTML=`<option value="">Todas</option>`+LABORES.map(l=>`<option value="${l.id}">${l.id}. ${l.d}</option>`).join('')});
   filtW();
   initLaborRows();
@@ -1071,7 +1109,7 @@ function filtW(){
   const sub=document.getElementById('selSub').value||(veTodoPredio()?'':userSubjefe());
   const sel=document.getElementById('selW');const cur=sel.value;
   // Arrayanes uses pool workers - always show all, ignore subjefe filter
-  const list=sortWs(pWs());
+  const list=sortWs(wActivos(pWs()));
   sel.innerHTML=`<option value="">— Seleccionar —</option>`+list.map(w=>`<option value="${w.id}">${wDisplay(w)}</option>`).join('');
   sel.value=cur;
   // populate reemplazo with ALL workers from ALL predios + Otro
@@ -1079,7 +1117,7 @@ function filtW(){
   if(selR){
     selR.innerHTML=`<option value="">— Seleccionar reemplazante —</option>`+
       Object.entries(wMap).flatMap(([pid,ws])=>
-        sortWs(ws).filter(w=>w.id!==cur).map(w=>`<option value="${pid}|${w.id}">${wDisplay(w)} (${PREDIOS[pid].nombre})</option>`)
+        sortWs(wActivos(ws)).filter(w=>w.id!==cur).map(w=>`<option value="${pid}|${w.id}">${wDisplay(w)} (${PREDIOS[pid].nombre})</option>`)
       ).join('')+
       `<option value="otro|otro">Otro (externo)</option>`+
       `<option value="sin|sin">Sin reemplazo disponible</option>`;
@@ -1116,6 +1154,7 @@ function checkAusente(){
     document.getElementById('tipoAusenciaDiv').style.display='none';
   }
   filtW();
+  updateCicloSel();
 }
 
 function resetAusenciaUI(){
@@ -1292,7 +1331,7 @@ function renderHoy(){
   // Si hay un subjefe elegido en el filtro, muestra solo los pendientes de su grupo.
   const subSel=(document.getElementById('selSub')||{}).value||'';
   const conRegistro=new Set(entries.map(r=>r.workerId));
-  let pend=pWs().filter(w=>!conRegistro.has(w.id));
+  let pend=wActivos(pWs()).filter(w=>!conRegistro.has(w.id));
   if(subSel)pend=pend.filter(w=>w.subjefe===subSel);
   pend=sortWs(pend);
   const grupoTxt=subSel?` (grupo ${subSel})`:'';
@@ -1376,7 +1415,9 @@ function eHTML(e,pred=activePred){
     ${reemplazoHTML}
     <div class="badges" style="margin:7px 0">
       <span class="badge b${pc}">${PREDIOS[pred].nombre}</span>
-      ${(()=>{const cnt={};ciclosE.forEach(c=>cnt[c.temporada]=(cnt[c.temporada]||0)+1);return ciclosE.map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:9px;padding:2px 7px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${cicloExtra(c,cnt)}</span>`).join('')})()}
+      ${e.cicloTemporada
+        ?`<span class="tbadge tb-${e.cicloTemporada}" style="font-size:9px;padding:2px 7px">${TICONS[e.cicloTemporada]} ${TNAMES[e.cicloTemporada]}${e.cicloSector?' · '+e.cicloSector:''}</span>`
+        :(()=>{const cnt={};ciclosE.forEach(c=>cnt[c.temporada]=(cnt[c.temporada]||0)+1);return ciclosE.map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:9px;padding:2px 7px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${cicloExtra(c,cnt)}</span>`).join('')})()}
       ${labores.length>1?`<span class="badge" style="background:var(--sand);color:var(--dark)">${labores.length} labores</span>`:''}
       ${totalH?`<span class="badge bh">⏱ ${totalH}h total</span>`:''}
       ${totalM?`<span class="badge bm">🪴 ${totalM} mesas</span>`:''}
@@ -1451,9 +1492,22 @@ async function guardar(){
   if(!skipLabores&&!labores.length){toast('⚠️ Agrega al menos una labor');return}
   let reemplazoPredioId=null,reemplazoWorkerId=null;
   if(ausente&&reemplazoVal){[reemplazoPredioId,reemplazoWorkerId]=reemplazoVal.split('|')}
+  // Época/ciclo de la labor: con 2+ ciclos vigentes se exige elegir (salvo ausencias);
+  // con uno solo se asigna automáticamente.
+  const csVig=getCiclosEn(activePred,subjefeParaCiclos(),selDate);
+  let cicloId=null,cicloTemporada=null,cicloSector=null;
+  if(csVig.length>=2){
+    const elegido=document.getElementById('selCiclo').value;
+    if(!elegido&&!skipLabores){toast('⚠️ Elige la época/ciclo de esta labor (hay '+csVig.length+' abiertas)');return}
+    const c=csVig.find(x=>x.id===elegido);
+    if(c){cicloId=c.id;cicloTemporada=c.temporada;cicloSector=c.sector||null;}
+  }else if(csVig.length===1){
+    cicloId=csVig[0].id;cicloTemporada=csVig[0].temporada;cicloSector=csVig[0].sector||null;
+  }
   loading(true,'Guardando…');
   try{
     await colRegistros(activePred).add({fecha:selDate,workerId:wId,labores,obs,
+      cicloId,cicloTemporada,cicloSector,
       ausente:ausente||false,tipoAusencia:tipo,licencia:licencia||false,vacaciones:vacaciones||false,
       ausAM,ausPM,ausInicio,ausFin,reemplazoPredioId,reemplazoWorkerId,
       lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid});
@@ -1493,7 +1547,7 @@ function renderAvance(){
   const wd=weekDates();
   let wRegs=rCache.filter(r=>wd.includes(r.fecha));
   const wMesas=e=>(e.labores||[{mesas:e.mesas||0}]).reduce((s,l)=>s+(l.mesas||0),0);
-  const visWs=sortWs(veTodoPredio()?pWs():pWs().filter(w=>w.subjefe===userSubjefe()));
+  const visWs=sortWs(wActivos(veTodoPredio()?pWs():pWs().filter(w=>w.subjefe===userSubjefe())));
   const maxM=Math.max(1,...visWs.map(w=>wd.reduce((s,fd)=>s+wRegs.filter(r=>r.workerId===w.id&&r.fecha===fd).reduce((ss,e)=>ss+wMesas(e),0),0)));
   document.getElementById('avW').innerHTML=visWs.length?visWs.map(w=>{
     const tot=wd.reduce((s,fd)=>s+wRegs.filter(r=>r.workerId===w.id&&r.fecha===fd).reduce((ss,e)=>ss+wMesas(e),0),0);
@@ -1545,7 +1599,7 @@ function renderCiclos(){
       const cycles=cyclesOf(pid,sub).slice().sort((a,b)=>b.inicio.localeCompare(a.inicio));
       const gb=document.createElement('div');gb.className='group-block';
       gb.innerHTML=`<div class="gb-header">
-        <div><div class="gb-name">👤 ${sub}</div><div class="gb-wcount">${(wMap[pid]||[]).filter(w=>w.subjefe===sub).length} trabajadores</div></div>
+        <div><div class="gb-name">👤 ${sub}</div><div class="gb-wcount">${wActivos(wMap[pid]).filter(w=>w.subjefe===sub).length} trabajadores</div></div>
         <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end">${cicloBadges(pid,sub,todayIso,'11px','3px 9px')}</div>
       </div>`;
       const body=document.createElement('div');body.className='gb-body';
@@ -1851,6 +1905,8 @@ async function saveProgModal(){
 async function renderConfig(){
   document.getElementById('cfgPLbl').textContent=pD().nombre;
   document.getElementById('nS').innerHTML=pD().subjefes.map(s=>`<option>${s}</option>`).join('');
+  const bkSel=document.getElementById('bkS');
+  if(bkSel)bkSel.innerHTML=pD().subjefes.map(s=>`<option>${s}</option>`).join('');
   // predios overview
   document.getElementById('prediosOv').innerHTML=PRED_ORDER.map(pid=>{
     const p=PREDIOS[pid],pc={z1:'z1',z2:'z2',z3:'z3'}[pid];
@@ -1860,7 +1916,7 @@ async function renderConfig(){
         <div><div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:var(--c-${pc})">${p.nombre}</div>
           <div style="font-size:10px;color:var(--muted);margin-top:1px">Jefe: ${p.jefe}</div></div>
         <div style="text-align:right">
-          <div style="font-family:'DM Mono',monospace;font-size:12px;font-weight:600">${ws.length} trab.</div>
+          <div style="font-family:'DM Mono',monospace;font-size:12px;font-weight:600">${wActivos(ws).length} trab.</div>
         </div>
       </div>
       <div style="padding:9px 14px;background:var(--white)">
@@ -1869,13 +1925,15 @@ async function renderConfig(){
     </div>`;
   }).join('');
   // workers (orden alfabético por apellido)
-  document.getElementById('wList').innerHTML=(wMap[activePred]||[]).length
-    ?sortWs(wMap[activePred]).map(w=>`<div class="wrow">
-        <div><div class="wn">${wDisplay(w)}</div><div class="wm">${w.codigo||'—'} · ${w.subjefe}${w.plantas?` · ${w.plantas}pl`:''}</div></div>
+  // activos primero (alfabético), luego inactivos atenuados al final
+  const wOrden=[...sortWs(wActivos(wMap[activePred])),...sortWs((wMap[activePred]||[]).filter(w=>!esActivo(w)))];
+  document.getElementById('wList').innerHTML=wOrden.length
+    ?wOrden.map(w=>{const inact=!esActivo(w);return `<div class="wrow" style="${inact?'opacity:.5':''}">
+        <div><div class="wn">${wDisplay(w)}${inact?' <span class="role-badge" style="background:var(--sand);color:var(--muted)">Inactivo</span>':''}</div><div class="wm">${w.codigo||'—'} · ${w.subjefe}${w.plantas?` · ${w.plantas}pl`:''}</div></div>
         <div style="display:flex;gap:4px;flex-shrink:0">
-          <button class="btn btn-secondary btn-sm" onclick="modalEditarW('${w.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="delW('${w.id}')">✕</button>
+          <button class="btn ${inact?'btn-primary':'btn-warn'} btn-sm" onclick="toggleActivoW('${w.id}')" title="${inact?'Reactivar':'Dejar inactivo'}">${inact?'▶':'⏸'}</button><button class="btn btn-secondary btn-sm" onclick="modalEditarW('${w.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="delW('${w.id}')">✕</button>
         </div>
-      </div>`).join('')
+      </div>`}).join('')
     :`<div class="empty"><div style="padding:8px 0;font-size:12px">Sin trabajadores</div></div>`;
   // costo jornada (admin only)
   if(isAdmin()){
@@ -1903,6 +1961,56 @@ async function addW(){
     wMap[activePred].push({id:ref.id,nombre:n,nombres:nom,apellidos:ape,codigo:c,subjefe:s,plantas:p});
     ['nN','nA','nC','nP'].forEach(id=>document.getElementById(id).value='');
     populateSels();renderConfig();toast('✅ Trabajador agregado');
+  }catch(e){toast('Error: '+e.message)}
+  loading(false);
+}
+
+// Carga masiva: pega la dotación de un sector (una persona por línea) y los crea
+// todos en la zona activa con el subjefe elegido. Omite los que ya existen.
+async function addWBulk(){
+  const raw=document.getElementById('bulkW').value;
+  const s=document.getElementById('bkS').value;
+  const lineas=raw.split('\n').map(l=>l.trim().replace(/\s+/g,' ')).filter(l=>l.length>1);
+  if(!lineas.length){toast('⚠️ Pega la lista (una persona por línea)');return}
+  if(!s){toast('⚠️ Elige el subjefe');return}
+  // detectar duplicados contra los ya existentes en la zona activa (por nombre completo, sin mayúsculas/acentos)
+  const norm=t=>t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const existentes=new Set(pWs().map(w=>norm(w.nombre||'')));
+  const nuevos=[],omitidos=[];
+  lineas.forEach(l=>{ (existentes.has(norm(l))?omitidos:nuevos).push(l) });
+  if(!nuevos.length){toast('Todos los nombres de la lista ya existen en esta zona');return}
+  if(!confirm(`Se agregarán ${nuevos.length} trabajadores a ${pD().nombre} con subjefe ${s}${omitidos.length?`\n(${omitidos.length} ya existían y se omiten)`:''}.\n\n¿Continuar?`))return;
+  loading(true,`Agregando 0 / ${nuevos.length}…`);
+  let ok=0,fallas=0;
+  for(const linea of nuevos){
+    // separar nombres/apellidos con la misma regla que usa la app para mostrar
+    const sp=wSplit({nombre:linea});
+    try{
+      const doc={nombre:linea,nombres:sp.nombres,apellidos:sp.apellidos,codigo:'',subjefe:s,plantas:0};
+      const ref=await colWorkers(activePred).add(doc);
+      wMap[activePred].push({id:ref.id,...doc});
+      ok++;
+      loading(true,`Agregando ${ok} / ${nuevos.length}…`);
+    }catch(e){fallas++;console.error('bulk',linea,e)}
+  }
+  loading(false);
+  document.getElementById('bulkW').value='';
+  populateSels();renderConfig();
+  toast(`✅ ${ok} trabajadores agregados${omitidos.length?` · ${omitidos.length} omitidos (ya existían)`:''}${fallas?` · ⚠️ ${fallas} con error`:''}`);
+}
+
+// Activar / desactivar trabajador. Inactivo = fuera de selectores, pendientes y
+// conteos, pero sus registros históricos conservan el nombre en tarjetas e informes.
+async function toggleActivoW(id){
+  const w=(wMap[activePred]||[]).find(x=>x.id===id);if(!w)return;
+  const nuevo=!esActivo(w);
+  if(!nuevo&&!confirm(`¿Dejar INACTIVO a ${wDisplay(w)}?\n\nDejará de aparecer para registrar labores, pero su historial se conserva. Puedes reactivarlo cuando quieras con ▶.`))return;
+  loading(true,'Guardando…');
+  try{
+    await colWorkers(activePred).doc(id).update({activo:nuevo});
+    w.activo=nuevo;
+    populateSels();renderConfig();renderHoy();
+    toast(nuevo?`▶ ${wDisplay(w)} reactivado`:`⏸ ${wDisplay(w)} quedó inactivo`);
   }catch(e){toast('Error: '+e.message)}
   loading(false);
 }
