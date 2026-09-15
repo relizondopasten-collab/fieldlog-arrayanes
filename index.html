@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-15-5';
+const APP_V = '2026-09-15-6';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -780,6 +780,15 @@ function wActivos(list){return (list||[]).filter(esActivo)}
 // ── Trabajadores de todas las zonas / personal prestado ──
 // Los subjefes se prestan encargados entre zonas. El registro se guarda en la zona donde
 // se hizo la labor con prestadoDe = zona de origen y subjefeOrigen.
+// Asignación por SUBJEFE: los "propios" de la zona son los trabajadores (de cualquier colección)
+// cuyo subjefe es el de la zona (o el elegido en "Subjefe / Encargado"). El resto = otras zonas.
+const nSub=t=>String(t||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+const subIn=(sub,lista)=>lista.some(x=>nSub(x)===nSub(sub));
+function zonaDeSubjefe(sub){return sub?(PRED_ORDER.find(z=>subIn(sub,PREDIOS[z].subjefes))||null):null}
+function wTodos(){const vistos=new Set(),out=[];PRED_ORDER.forEach(z=>(wMap[z]||[]).forEach(w=>{if(!vistos.has(w.id)){vistos.add(w.id);out.push(w)}}));return out}
+function subsZonaSel(){const subs=pD().subjefes;const s=(document.getElementById('selSub')||{}).value||'';return (s&&subs.includes(s))?[s]:subs}
+function wsPropios(subs=subsZonaSel()){return wTodos().filter(w=>subIn(w.subjefe,subs))}
+function wZonaOrigen(w){return (w&&zonaDeSubjefe(w.subjefe))||(w?wZonaDe(w.id):null)}
 function wZonaDe(id){return PRED_ORDER.find(z=>(wMap[z]||[]).some(w=>w.id===id))||null}
 function wById(id,zHint){
   const zs=[zHint,activePred,...PRED_ORDER].filter(Boolean);
@@ -1262,12 +1271,18 @@ function filtW(){
   // Arrayanes uses pool workers - always show all, ignore subjefe filter
   const prest=!!(document.getElementById('chkPrestado')||{}).checked;
   if(prest){
-    sel.innerHTML=`<option value="">— Seleccionar encargado de otra zona —</option>`+PRED_ORDER.filter(z=>z!==activePred).map(z=>{
-      const l=sortWs(wActivos(wMap[z]||[]));
-      return l.length?`<optgroup label="${PREDIOS[z].nombre} · ${PREDIOS[z].subjefes.join(', ')}">${l.map(w=>`<option value="${w.id}">${wDisplay(w)}</option>`).join('')}</optgroup>`:'';
+    // lista completa de los encargados asignados a subjefes de OTRAS zonas, agrupada por zona/subjefe
+    const subsZona=pD().subjefes;
+    const otros=wActivos(wTodos()).filter(w=>!subIn(w.subjefe,subsZona));
+    const grupos=[...PRED_ORDER.filter(z=>z!==activePred).map(z=>({lbl:`${PREDIOS[z].nombre} · ${PREDIOS[z].subjefes.join(', ')}`,l:otros.filter(w=>wZonaOrigen(w)===z)})),
+      {lbl:'Sin subjefe asignado',l:otros.filter(w=>!zonaDeSubjefe(w.subjefe)&&wZonaDe(w.id)===activePred)}];
+    sel.innerHTML=`<option value="">— Seleccionar encargado de otra zona —</option>`+grupos.map(g=>{
+      const l=sortWs(g.l);
+      return l.length?`<optgroup label="${g.lbl}">${l.map(w=>`<option value="${w.id}">${wDisplay(w)}</option>`).join('')}</optgroup>`:'';
     }).join('');
   }else{
-    const list=sortWs(wActivos(pWs()));
+    // solo los encargados asignados al subjefe de esta zona (o al elegido arriba)
+    const list=sortWs(wActivos(wsPropios()));
     sel.innerHTML=`<option value="">— Seleccionar —</option>`+list.map(w=>`<option value="${w.id}">${wDisplay(w)}</option>`).join('');
   }
   sel.value=cur;if(sel.value!==cur)sel.value='';
@@ -1500,8 +1515,8 @@ function renderHoy(){
   const conRegistro=new Set(entries.map(r=>r.workerId));
   const fueraHoy=Object.entries(prestFuera).flatMap(([z,rs])=>rs.filter(r=>r.fecha===selDate).map(r=>({z,r})));
   const idsFuera=new Set(fueraHoy.map(x=>x.r.workerId));
-  let pend=wActivos(pWs()).filter(w=>!conRegistro.has(w.id)&&!idsFuera.has(w.id));
-  if(subSel)pend=pend.filter(w=>w.subjefe===subSel);
+  let pend=wActivos(wsPropios(pD().subjefes)).filter(w=>!conRegistro.has(w.id)&&!idsFuera.has(w.id));
+  if(subSel)pend=pend.filter(w=>nSub(w.subjefe)===nSub(subSel));
   pend=sortWs(pend);
   const grupoTxt=subSel?` (grupo ${subSel})`:'';
   const pendHTML=pend.length
@@ -1618,9 +1633,9 @@ async function guardar(){
   const reemplazoVal=document.getElementById('selReemplazo').value;
   if(!wId){toast('⚠️ Selecciona un trabajador');return}
   if(fotosPend.length&&!obs){toast('⚠️ Escribe la observación para guardar las fotos');return}
-  const zOrigen=wZonaDe(wId);
+  const wSel=wById(wId);
+  const zOrigen=wZonaOrigen(wSel);
   const prestadoDe=(zOrigen&&zOrigen!==activePred)?zOrigen:null;
-  const wSel=wById(wId,zOrigen);
   const subjefeOrigen=prestadoDe?((wSel&&wSel.subjefe)||''):null;
   const tipoSel=document.querySelector('input[name="tipoAusencia"]:checked');
   const tipo=ausente?(tipoSel?tipoSel.value:'sin'):null;
