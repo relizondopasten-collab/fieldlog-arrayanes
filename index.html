@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-15-2';
+const APP_V = '2026-09-15-3';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -369,7 +369,10 @@ select:focus,input:focus{border-color:var(--green)}
     <div class="card">
       <div class="card-title">✍️ Nueva Entrada</div>
       <div class="form-row"><label>Subjefe / Encargado</label><select id="selSub" onchange="filtW()"><option value="">Todos</option></select></div>
-      <div class="form-row"><label>Trabajador</label><select id="selW" onchange="checkAusente()"><option value="">— Seleccionar —</option></select></div>
+      <div class="form-row"><label>Trabajador</label><select id="selW" onchange="checkAusente()"><option value="">— Seleccionar —</option></select>
+        <label for="chkPrestado" style="display:flex;align-items:center;gap:7px;margin:6px 0 0;font-size:12px;text-transform:none;letter-spacing:0;font-weight:600;color:var(--dark);cursor:pointer"><input type="checkbox" id="chkPrestado" onchange="onChkPrestado()" style="width:16px;height:16px;accent-color:var(--green);cursor:pointer">👥 Encargado prestado de otra zona</label>
+        <div id="prestadoInfo" style="display:none;font-size:11px;color:var(--muted);margin-top:4px;line-height:1.4">La labor cuenta en <b>esta zona</b> (costos, época e informes) y queda marcada como prestada. En su zona de origen no aparecerá como "sin registro" ese día.</div>
+      </div>
       <!-- Época/ciclo: aparece solo cuando hay 2+ ciclos vigentes en la zona (ej. invierno + primor) -->
       <div class="form-row" id="cicloSelDiv" style="display:none">
         <label>Época / ciclo de esta labor</label>
@@ -533,6 +536,15 @@ select:focus,input:focus{border-color:var(--green)}
       <div class="form-row"><textarea id="bulkW" rows="6" placeholder="Juan Mendoza&#10;Miguelina Arancibia&#10;Francisco Leiva Núñez&#10;…" style="width:100%;background:var(--cream);border:1.5px solid var(--sand);border-radius:10px;padding:10px 11px;font-size:13px;font-family:'Inter',sans-serif;color:var(--text);outline:none;resize:vertical"></textarea></div>
       <div class="form-row"><label>Subjefe para toda la lista</label><select id="bkS"></select></div>
       <button class="btn btn-secondary" onclick="addWBulk()">＋ Agregar toda la lista</button>
+    </div>
+    <!-- dotación definitiva de encargados (solo admin, se aplica una vez) -->
+    <div id="dotacionAdminSection" style="display:none">
+      <div class="card">
+        <div class="card-title">📋 Dotación definitiva de encargados (sept. 2026)</div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Carga los encargados de la planilla definitiva, cada uno en la zona de su subjefe y con sus plantas. <b>Todos los trabajadores actuales quedan inactivos (⏸)</b>: no se borran y el historial conserva sus nombres. Se aplica una sola vez.</p>
+        <div id="dotacionEstado" style="font-size:12px;margin-bottom:9px"></div>
+        <button class="btn btn-primary" id="dotacionBtn" onclick="aplicarDotacion202609()">Cargar dotación definitiva</button>
+      </div>
     </div>
     <!-- usuarios del sistema (solo admin) -->
     <div id="usersAdminSection" style="display:none">
@@ -762,6 +774,88 @@ function sortWs(list){return (list||[]).slice().sort((a,b)=>wDisplay(a).localeCo
 function esActivo(w){return w.activo!==false}
 function wActivos(list){return (list||[]).filter(esActivo)}
 
+// ── Trabajadores de todas las zonas / personal prestado ──
+// Los subjefes se prestan encargados entre zonas. El registro se guarda en la zona donde
+// se hizo la labor con prestadoDe = zona de origen y subjefeOrigen.
+function wZonaDe(id){return PRED_ORDER.find(z=>(wMap[z]||[]).some(w=>w.id===id))||null}
+function wById(id,zHint){
+  const zs=[zHint,activePred,...PRED_ORDER].filter(Boolean);
+  for(const z of zs){const w=(wMap[z]||[]).find(x=>x.id===id);if(w)return w}
+  return null;
+}
+// Lista para informes/programación de una zona: sus trabajadores + los de otras zonas como
+// "prestados" (subjefe = el de esta zona, nombre con sufijo) para que sus registros cuadren.
+function wsZonaConPrestados(pid=activePred){
+  const sub=PREDIOS[pid].subjefes[0];
+  const otros=PRED_ORDER.filter(z=>z!==pid).flatMap(z=>(wMap[z]||[]).map(w=>{
+    const sp=wSplit(w);
+    return {...w,nombres:sp.nombres+` (prestado · ${PREDIOS[z].nombre})`,apellidos:sp.apellidos,subjefe:sub,prestadoDe:z,subjefeOrigen:w.subjefe};
+  }));
+  return [...(wMap[pid]||[]),...otros];
+}
+
+// ── Dotación definitiva de encargados (planilla sept. 2026) ──
+const DOTACION_2026_09=[
+  {"n": "Sivi", "a": "Ahumada Ahumada", "p": 10000, "s": "Mirta Peña"},
+  {"n": "Marcelo", "a": "Amaro Galarce", "p": 12000, "s": "Claudio Cuevas"},
+  {"n": "Miguelina", "a": "Arancibia Cisternas", "p": 14000, "s": "Mirta Peña"},
+  {"n": "Ana", "a": "Araya Quiroz", "p": 10000, "s": "Mirta Peña"},
+  {"n": "Ruth", "a": "Avaria Barahona", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Jose", "a": "Cardenas Guzman", "p": 12000, "s": "Mirta Peña"},
+  {"n": "Patricia", "a": "Castillo Beiza", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Otalus", "a": "Charles", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Wildor", "a": "Derilus", "p": 14000, "s": "Mirta Peña"},
+  {"n": "Jimena", "a": "Leiva Mejias", "p": 9500, "s": "Mirta Peña"},
+  {"n": "Eugenia", "a": "Espinoza Moya", "p": 12000, "s": "Mirta Peña"},
+  {"n": "Javier", "a": "Espinoza Pallero", "p": 12000, "s": "Mirta Peña"},
+  {"n": "Patricio", "a": "Figueroa Cayul", "p": 12000, "s": "Santiago Orrego"},
+  {"n": "Miguel", "a": "Figueroa Farias", "p": 14000, "s": "Mirta Peña"},
+  {"n": "Lenise", "a": "Fleurisma", "p": 12000, "s": "Claudio Cuevas"},
+  {"n": "Margarita", "a": "Flores Beiza", "p": 12000, "s": "Santiago Orrego"},
+  {"n": "Leonor", "a": "Fuentes Fuentes", "p": 9500, "s": "Santiago Orrego"},
+  {"n": "Daniela", "a": "Gamboa Pacheco", "p": 14000, "s": "Claudio Cuevas"},
+  {"n": "Beatriz", "a": "Gonzalez Vera", "p": 10000, "s": "Mirta Peña"},
+  {"n": "Patricio", "a": "Guzman Figueroa", "p": 14000, "s": "Claudio Cuevas"},
+  {"n": "Ruben", "a": "Hernandez Acevedo", "p": 14000, "s": "Claudio Cuevas"},
+  {"n": "Camilo", "a": "Hidalgo Ossandon", "p": 11500, "s": "Claudio Cuevas"},
+  {"n": "Jismond", "a": "Jeune", "p": 14000, "s": "Mirta Peña"},
+  {"n": "Luis", "a": "Lazo Jorquera", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Francisco", "a": "Leiva Leiva", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Francisco", "a": "Leiva Nuñez", "p": 12500, "s": "Mirta Peña"},
+  {"n": "Luis", "a": "Leiva Zamora", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Luisa", "a": "Levinao Ñanco", "p": 12000, "s": "Mirta Peña"},
+  {"n": "Juan", "a": "Mendoza Ortega", "p": 13000, "s": "Mirta Peña"},
+  {"n": "Marie-Rose", "a": "Merite", "p": 12000, "s": "Santiago Orrego"},
+  {"n": "Alicia", "a": "Miranda Miranda", "p": 9500, "s": "Claudio Cuevas"},
+  {"n": "Carola", "a": "Miranda Ossandon", "p": 9500, "s": "Claudio Cuevas"},
+  {"n": "Pilar", "a": "Miranda Miranda", "p": 9500, "s": "Claudio Cuevas"},
+  {"n": "Paulo", "a": "Molina Castillo", "p": 12000, "s": "Claudio Cuevas"},
+  {"n": "Jorge", "a": "Navarro Borquez", "p": 10000, "s": "Santiago Orrego"},
+  {"n": "Ines", "a": "Nuñez Gonzalez", "p": 10000, "s": "Claudio Cuevas"},
+  {"n": "Gulove", "a": "Oge", "p": 10000, "s": "Santiago Orrego"},
+  {"n": "Juan", "a": "Olivares Ramirez", "p": 12000, "s": "Claudio Cuevas"},
+  {"n": "Carlos", "a": "Olmedo Gomez", "p": 13000, "s": "Mirta Peña"},
+  {"n": "Juan", "a": "Orostica Ahumada", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Jose", "a": "Orostica Cabanes", "p": 12500, "s": "Claudio Cuevas"},
+  {"n": "Christian", "a": "Pereira Trigo", "p": 10000, "s": "Mirta Peña"},
+  {"n": "Reginald", "a": "Pierre", "p": 13000, "s": "Mirta Peña"},
+  {"n": "Jose", "a": "Queipul Linco", "p": 9500, "s": "Claudio Cuevas"},
+  {"n": "Yesenia", "a": "Quezada Vera", "p": 10000, "s": "Santiago Orrego"},
+  {"n": "Jorge", "a": "Ramirez Muñoz", "p": 11000, "s": "Santiago Orrego"},
+  {"n": "Juan", "a": "Rodriguez Cisternas", "p": 14000, "s": "Claudio Cuevas"},
+  {"n": "Eduardo", "a": "Rodriguez Cisternas", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Teresita", "a": "Rojas Soto", "p": 10000, "s": "Claudio Cuevas"},
+  {"n": "Francisco", "a": "Salas Salas", "p": 10000, "s": "Santiago Orrego"},
+  {"n": "Charleus", "a": "Seneat", "p": 13000, "s": "Mirta Peña"},
+  {"n": "Batilus", "a": "Titus", "p": 14000, "s": "Claudio Cuevas"},
+  {"n": "Juan", "a": "Valdivia Aparicio", "p": 14000, "s": "Mirta Peña"},
+  {"n": "Luis", "a": "Valle Olivares", "p": 14000, "s": "Claudio Cuevas"},
+  {"n": "Bernardita", "a": "Varas Huerta", "p": 9500, "s": "Claudio Cuevas"},
+  {"n": "Juana", "a": "Vega Muñoz", "p": 13000, "s": "Mirta Peña"},
+  {"n": "Andres", "a": "Vergara Hernandez", "p": 14000, "s": "Claudio Cuevas"},
+  {"n": "Jesus", "a": "Vicencio Ponce", "p": 9500, "s": "Mirta Peña"}
+];
+
 // ══════════════════════════════════════════════
 // FIREBASE INIT
 // ══════════════════════════════════════════════
@@ -797,6 +891,8 @@ let regWeekOffset  = 0;   // navegación de semanas en Registrar (0 = semana act
 
 // In-memory caches (refreshed on predio change / live listeners)
 let wMap       = {z1:[],z2:[],z3:[]};
+let unsubPrest = [];   // listeners de registros "prestados" de esta zona en otras
+let prestFuera = {};   // {zonaDestino: [registros con prestadoDe = zona activa]}
 let rCache     = [];   // registros of active predio
 let ciclosCache= {};   // {'predioId|subjefe': [cycles]} — con clave por predio para que el admin vea las 3 zonas
 let progCache  = {};   // {mondayIso: progDoc}
@@ -971,6 +1067,7 @@ function applyRoleUI(){
   // Todos los roles ven las 3 zonas y los informes (permisos igualados).
   // Solo queda reservado a admin: usuarios del sistema, costo jornada y borrado masivo.
   document.getElementById('usersAdminSection').style.display=isAdmin()?'block':'none';
+  document.getElementById('dotacionAdminSection').style.display=isAdmin()?'block':'none';
   document.getElementById('costCard').style.display=isAdmin()?'block':'none';
   document.getElementById('clearDataBtn').style.display=isAdmin()?'block':'none';
   document.getElementById('addWBtn').style.display='block';
@@ -998,8 +1095,17 @@ async function loadPredioData(pid){
 
   try{
     // Load workers once
-    const wsSnap=await colWorkers(pid).get();
-    wMap[pid]=wsSnap.docs.map(d=>({id:d.id,...d.data()}));
+    // Trabajadores de LAS 3 zonas (necesario para registrar personal prestado)
+    const wsSnaps=await Promise.all(PRED_ORDER.map(z=>colWorkers(z).get()));
+    PRED_ORDER.forEach((z,i)=>{wMap[z]=wsSnaps[i].docs.map(d=>({id:d.id,...d.data()}))});
+
+    // Encargados de ESTA zona prestados hoy a otras zonas (para no mostrarlos "sin registro")
+    unsubPrest.forEach(u=>u&&u());unsubPrest=[];prestFuera={};
+    PRED_ORDER.filter(z=>z!==pid).forEach(z=>{
+      unsubPrest.push(colRegistros(z).where('prestadoDe','==',pid).onSnapshot(
+        snap=>{prestFuera[z]=snap.docs.map(d=>({id:d.id,...d.data()}));if(activePred===pid)renderHoy();},
+        err=>console.error('prestados',err)));
+    });
 
     // Live listener for registros of current week (and nearby)
     unsubRegistros=colRegistros(pid)
@@ -1151,9 +1257,17 @@ function filtW(){
   const sub=document.getElementById('selSub').value||(veTodoPredio()?'':userSubjefe());
   const sel=document.getElementById('selW');const cur=sel.value;
   // Arrayanes uses pool workers - always show all, ignore subjefe filter
-  const list=sortWs(wActivos(pWs()));
-  sel.innerHTML=`<option value="">— Seleccionar —</option>`+list.map(w=>`<option value="${w.id}">${wDisplay(w)}</option>`).join('');
-  sel.value=cur;
+  const prest=!!(document.getElementById('chkPrestado')||{}).checked;
+  if(prest){
+    sel.innerHTML=`<option value="">— Seleccionar encargado de otra zona —</option>`+PRED_ORDER.filter(z=>z!==activePred).map(z=>{
+      const l=sortWs(wActivos(wMap[z]||[]));
+      return l.length?`<optgroup label="${PREDIOS[z].nombre} · ${PREDIOS[z].subjefes.join(', ')}">${l.map(w=>`<option value="${w.id}">${wDisplay(w)}</option>`).join('')}</optgroup>`:'';
+    }).join('');
+  }else{
+    const list=sortWs(wActivos(pWs()));
+    sel.innerHTML=`<option value="">— Seleccionar —</option>`+list.map(w=>`<option value="${w.id}">${wDisplay(w)}</option>`).join('');
+  }
+  sel.value=cur;if(sel.value!==cur)sel.value='';
   // populate reemplazo with ALL workers from ALL predios + Otro
   const selR=document.getElementById('selReemplazo');
   if(selR){
@@ -1187,10 +1301,18 @@ function jornadaTxt(r){
   return 'Día completo';
 }
 
+function onChkPrestado(){
+  const on=document.getElementById('chkPrestado').checked;
+  document.getElementById('prestadoInfo').style.display=on?'block':'none';
+  document.getElementById('selW').value='';
+  checkAusente();
+}
 function checkAusente(){
   const wId=document.getElementById('selW').value;
-  document.getElementById('ausenteSection').style.display=wId?'block':'none';
-  if(!wId){
+  const prest=!!(document.getElementById('chkPrestado')||{}).checked;
+  // Un prestado no se marca ausente aquí: la ausencia la registra su zona de origen
+  document.getElementById('ausenteSection').style.display=(wId&&!prest)?'block':'none';
+  if(!wId||prest){
     document.getElementById('chkAusente').checked=false;
     resetAusenciaUI();
     document.getElementById('tipoAusenciaDiv').style.display='none';
@@ -1373,7 +1495,9 @@ function renderHoy(){
   // Si hay un subjefe elegido en el filtro, muestra solo los pendientes de su grupo.
   const subSel=(document.getElementById('selSub')||{}).value||'';
   const conRegistro=new Set(entries.map(r=>r.workerId));
-  let pend=wActivos(pWs()).filter(w=>!conRegistro.has(w.id));
+  const fueraHoy=Object.entries(prestFuera).flatMap(([z,rs])=>rs.filter(r=>r.fecha===selDate).map(r=>({z,r})));
+  const idsFuera=new Set(fueraHoy.map(x=>x.r.workerId));
+  let pend=wActivos(pWs()).filter(w=>!conRegistro.has(w.id)&&!idsFuera.has(w.id));
   if(subSel)pend=pend.filter(w=>w.subjefe===subSel);
   pend=sortWs(pend);
   const grupoTxt=subSel?` (grupo ${subSel})`:'';
@@ -1390,13 +1514,24 @@ function renderHoy(){
   const entriesHTML=entries.length
     ?entries.map(e=>eHTML(e)).join('')
     :`<div class="empty"><div class="empty-icon">📝</div><div>Sin entradas para este día</div></div>`;
-  div.innerHTML=pendHTML+entriesHTML;
+  let fueraHTML='';
+  if(fueraHoy.length){
+    const vistos=new Set();
+    const items=fueraHoy.filter(x=>{if(vistos.has(x.r.workerId))return false;vistos.add(x.r.workerId);return true})
+      .map(x=>{const w=wById(x.r.workerId,activePred);return `<span class="badge" style="background:#E0F2FE;color:#0369A1">${w?wDisplay(w):'—'} → ${PREDIOS[x.z].nombre}</span>`});
+    fueraHTML=`<div class="card" style="padding:10px 14px;border-left:4px solid #0EA5E9">
+        <div class="card-title" style="margin-bottom:7px">👥 Prestados a otra zona este día: ${items.length}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">${items.join('')}</div>
+      </div>`;
+  }
+  div.innerHTML=pendHTML+fueraHTML+entriesHTML;
 }
 
 function eHTML(e,pred=activePred){
-  const w=pWs().find(x=>x.id===e.workerId);
+  const w=wById(e.workerId,e.prestadoDe||pred);
   const pc={z1:'z1',z2:'z2',z3:'z3'}[pred];
-  const ciclosE=w?getCiclosEn(pred,w.subjefe,e.fecha):[];
+  const subCic=(w&&PREDIOS[pred].subjefes.includes(w.subjefe))?w.subjefe:PREDIOS[pred].subjefes[0];
+  const ciclosE=w?getCiclosEn(pred,subCic,e.fecha):[];
   const labores=e.labores||[{laborId:e.laborId,horas:e.horas||0,mesas:e.mesas||0}];
   const totalH=labores.reduce((s,l)=>s+(l.horas||0),0);
   const totalM=labores.reduce((s,l)=>s+(l.mesas||0),0);
@@ -1450,7 +1585,7 @@ function eHTML(e,pred=activePred){
     <div class="ehdr">
       <div>
         <div class="ename" style="${e.ausente?'color:var(--muted);text-decoration:line-through':''}">${w?wDisplay(w):'—'}</div>
-        <div class="emeta">${w?`👤 ${w.subjefe} · `:''}${fD(e.fecha)}</div>
+        <div class="emeta">${e.prestadoDe&&PREDIOS[e.prestadoDe]?`<span style="color:#0369A1;font-weight:600">👥 Prestado de ${PREDIOS[e.prestadoDe].nombre}${(e.subjefeOrigen||(w&&w.subjefe))?' ('+(e.subjefeOrigen||w.subjefe)+')':''}</span> · `:(w?`👤 ${w.subjefe} · `:'')}${fD(e.fecha)}</div>
       </div>
       ${canDel?`<button class="del-btn" onclick="delEntry('${e.id}')">✕</button>`:''}
     </div>
@@ -1476,10 +1611,14 @@ function eHTML(e,pred=activePred){
 async function guardar(){
   const wId=document.getElementById('selW').value;
   const obs=document.getElementById('iO').value.trim();
-  const ausente=document.getElementById('chkAusente').checked;
+  const ausente=document.getElementById('chkAusente').checked&&!(document.getElementById('chkPrestado')||{}).checked;
   const reemplazoVal=document.getElementById('selReemplazo').value;
   if(!wId){toast('⚠️ Selecciona un trabajador');return}
   if(fotosPend.length&&!obs){toast('⚠️ Escribe la observación para guardar las fotos');return}
+  const zOrigen=wZonaDe(wId);
+  const prestadoDe=(zOrigen&&zOrigen!==activePred)?zOrigen:null;
+  const wSel=wById(wId,zOrigen);
+  const subjefeOrigen=prestadoDe?((wSel&&wSel.subjefe)||''):null;
   const tipoSel=document.querySelector('input[name="tipoAusencia"]:checked');
   const tipo=ausente?(tipoSel?tipoSel.value:'sin'):null;
   const cfgAus=tipo?(TIPO_AUS[tipo]||TIPO_AUS.sin):null;
@@ -1555,14 +1694,15 @@ async function guardar(){
     const nFotos=fotosPend.length;
     let fotosSell=[];
     if(nFotos){
-      const w=pWs().find(x=>x.id===wId);
-      const sello=selloFoto(w,labores,obs,ausente,tipo);
+      const sello=selloFoto(wSel,labores,obs,ausente,tipo);
+      if(prestadoDe)sello.splice(2,0,`Prestado de ${PREDIOS[prestadoDe].nombre}${subjefeOrigen?' ('+subjefeOrigen+')':''}`);
       for(const f of fotosPend){
         const img=await cargarImg(f.data);
         fotosSell.push({data:canvasJpeg(img,FOTO_LADO,FOTO_Q,[...sello,'Foto tomada: '+fHora(f.t)]),t:f.t});
       }
     }
     const regRef=await colRegistros(activePred).add({fecha:selDate,workerId:wId,labores,obs,fotos:nFotos,
+      prestadoDe,subjefeOrigen,
       cicloId,cicloTemporada,cicloSector,
       ausente:ausente||false,tipoAusencia:tipo,licencia:licencia||false,vacaciones:vacaciones||false,
       ausAM,ausPM,ausInicio,ausFin,reemplazoPredioId,reemplazoWorkerId,
@@ -1698,7 +1838,7 @@ async function verFotos(regId,pred){
     const fotos=snap.docs.map(d=>d.data()).sort((a,b)=>(a.idx||0)-(b.idx||0));
     if(!fotos.length){loading(false);toast('No se encontraron fotos para este registro');return}
     const r=rCache.find(x=>x.id===regId);
-    const w=r?pWs().find(x=>x.id===r.workerId):null;
+    const w=r?wById(r.workerId,r.prestadoDe):null;
     document.getElementById('fotoViewerTit').textContent=`📷 ${w?wDisplay(w):''}${r?' · '+fD(r.fecha):''}`;
     document.getElementById('fotoViewerBody').innerHTML=(r&&r.obs?`<div style="color:#eee;font-size:12px;margin-bottom:10px">📌 ${escH(r.obs)}</div>`:'')+
       fotos.map((f,i)=>`<div style="margin-bottom:14px">
@@ -1719,7 +1859,7 @@ function renderAvance(){
   const entryH=e=>(e.labores||[{horas:e.horas||0}]).reduce((s,l)=>s+(l.horas||0),0);
   const entryM=e=>(e.labores||[{mesas:e.mesas||0}]).reduce((s,l)=>s+(l.mesas||0),0);
   let todayE=rCache.filter(r=>r.fecha===selDate);
-  if(!veTodoPredio()){const sub=userSubjefe();todayE=todayE.filter(r=>{const w=pWs().find(x=>x.id===r.workerId);return w&&w.subjefe===sub});}
+  if(!veTodoPredio()){const sub=userSubjefe();todayE=todayE.filter(r=>{const w=wById(r.workerId,r.prestadoDe);return w&&w.subjefe===sub});}
   const tH=todayE.reduce((s,r)=>s+entryH(r),0),tM=todayE.reduce((s,r)=>s+entryM(r),0);
   document.getElementById('statsRow').innerHTML=`
     <div class="sbox"><div class="sval">${rCache.length}</div><div class="slbl">Total reg.</div></div>
@@ -1749,7 +1889,7 @@ function renderAvance(){
     </tr></thead>
     <tbody>${wd.map((iso,i)=>{
       let dr=rCache.filter(r=>r.fecha===iso);
-      if(!veTodoPredio()){const sub=userSubjefe();dr=dr.filter(r=>{const w=pWs().find(x=>x.id===r.workerId);return w&&w.subjefe===sub});}
+      if(!veTodoPredio()){const sub=userSubjefe();dr=dr.filter(r=>{const w=wById(r.workerId,r.prestadoDe);return w&&w.subjefe===sub});}
       const h=dr.reduce((s,r)=>s+entryH(r),0),m=dr.reduce((s,r)=>s+entryM(r),0),isT=iso===selDate;
       return `<tr style="${isT?'background:var(--lime);':''}border-bottom:1px solid var(--sand)">
         <td style="padding:6px 3px;font-weight:${isT?700:400}">${DIAS[i]} ${iso.slice(8)}</td>
@@ -1979,7 +2119,8 @@ async function renderProg(){
       const tasks=(prog.dias||{})[dayIso]||[];
       const dayName=progDayName(mondayIso,dayIso);
       const isToday=dayIso===todayIso;
-      let realEntries=rCache.filter(r=>r.fecha===dayIso&&pWs().some(w=>w.id===r.workerId&&w.subjefe===subjefe));
+      const wsProg=wsZonaConPrestados();
+      let realEntries=rCache.filter(r=>r.fecha===dayIso&&wsProg.some(w=>w.id===r.workerId&&w.subjefe===subjefe));
       const card=document.createElement('div');card.className='prog-day-card';
       if(isToday)card.style.boxShadow='0 0 0 2px var(--green),0 2px 12px rgba(0,0,0,.10)';
       const progLV=recLV(prog);
@@ -2116,6 +2257,16 @@ async function renderConfig(){
         </div>
       </div>`}).join('')
     :`<div class="empty"><div style="padding:8px 0;font-size:12px">Sin trabajadores</div></div>`;
+  // estado de la dotación definitiva
+  const de=document.getElementById('dotacionEstado');
+  if(de&&isAdmin()){
+    const subToZ={};PRED_ORDER.forEach(z=>PREDIOS[z].subjefes.forEach(sj=>subToZ[sj]=z));
+    const cnt={};DOTACION_2026_09.forEach(d=>{const z=subToZ[d.s];cnt[z]=(cnt[z]||0)+1});
+    const hecha=cfgGlobal.dotacion202609;
+    de.innerHTML=PRED_ORDER.map(z=>`<div>• ${PREDIOS[z].nombre} — ${PREDIOS[z].subjefes.join(', ')}: <b>${cnt[z]||0}</b></div>`).join('')+
+      `<div style="margin-top:5px;color:${hecha?'var(--green)':'var(--muted)'}">${hecha?'✅ Aplicada el '+fHora(hecha):`Total: ${DOTACION_2026_09.length} encargados · aún no aplicada`}</div>`;
+    const bt=document.getElementById('dotacionBtn');if(bt)bt.style.display=hecha?'none':'block';
+  }
   // costo jornada (admin only)
   if(isAdmin()){
     const ci=document.getElementById('cfgCostoJornada'),hi=document.getElementById('cfgHorasJornada');
@@ -2178,6 +2329,47 @@ async function addWBulk(){
   document.getElementById('bulkW').value='';
   populateSels();renderConfig();
   toast(`✅ ${ok} trabajadores agregados${omitidos.length?` · ${omitidos.length} omitidos (ya existían)`:''}${fallas?` · ⚠️ ${fallas} con error`:''}`);
+}
+
+// Aplica la dotación definitiva: inactiva a TODOS los trabajadores activos de las 3 zonas
+// y crea los de DOTACION_2026_09 en la zona de su subjefe. Marca arr_config/global.dotacion202609.
+async function aplicarDotacion202609(){
+  if(!isAdmin()){toast('Solo administradores');return}
+  const subToZ={};PRED_ORDER.forEach(z=>PREDIOS[z].subjefes.forEach(sj=>subToZ[sj]=z));
+  const desconocido=DOTACION_2026_09.find(d=>!subToZ[d.s]);
+  if(desconocido){toast('⚠️ Subjefe no reconocido en la planilla: '+desconocido.s);return}
+  const porZona={};DOTACION_2026_09.forEach(d=>{const z=subToZ[d.s];porZona[z]=(porZona[z]||0)+1});
+  loading(true,'Revisando trabajadores…');
+  let snaps;
+  try{
+    const g=await db.collection('arr_config').doc('global').get();
+    if(g.exists&&g.data().dotacion202609){loading(false);cfgGlobal.dotacion202609=g.data().dotacion202609;renderConfig();toast('⚠️ Esta dotación ya fue aplicada el '+fHora(g.data().dotacion202609));return}
+    snaps=await Promise.all(PRED_ORDER.map(z=>colWorkers(z).get()));
+  }catch(e){loading(false);toast('Error: '+e.message);return}
+  loading(false);
+  const aInactivar=[];
+  snaps.forEach((sn,i)=>sn.docs.forEach(d=>{if(d.data().activo!==false)aInactivar.push({z:PRED_ORDER[i],id:d.id})}));
+  const resumen=PRED_ORDER.map(z=>`• ${PREDIOS[z].nombre} (${PREDIOS[z].subjefes.join(', ')}): ${porZona[z]||0}`).join('\n');
+  if(!confirm(`Cargar la dotación definitiva: ${DOTACION_2026_09.length} encargados\n${resumen}\n\nSe dejarán INACTIVOS los ${aInactivar.length} trabajadores activos actuales (no se borran; el historial conserva sus nombres).\n\n¿Continuar?`))return;
+  loading(true,'Aplicando dotación…');
+  try{
+    const ops=[];
+    aInactivar.forEach(x=>ops.push(b=>b.update(colWorkers(x.z).doc(x.id),{activo:false})));
+    DOTACION_2026_09.forEach(d=>{const z=subToZ[d.s];
+      ops.push(b=>b.set(colWorkers(z).doc(),{nombre:d.n+' '+d.a,nombres:d.n,apellidos:d.a,codigo:'',subjefe:d.s,plantas:d.p,activo:true,origen:'dotacion-2026-09'}))});
+    const marca=Date.now();
+    ops.push(b=>b.set(db.collection('arr_config').doc('global'),{dotacion202609:marca},{merge:true}));
+    // lotes de máx. 400 escrituras (límite Firestore: 500 por batch)
+    for(let i=0;i<ops.length;i+=400){
+      const b=db.batch();ops.slice(i,i+400).forEach(fn=>fn(b));
+      loading(true,`Aplicando dotación… ${Math.min(i+400,ops.length)} / ${ops.length}`);
+      await b.commit();
+    }
+    cfgGlobal.dotacion202609=marca;
+    await loadPredioData(activePred);
+    renderConfig();
+    toast(`✅ Dotación cargada: ${DOTACION_2026_09.length} encargados · ${aInactivar.length} inactivados`);
+  }catch(e){loading(false);toast('Error: '+e.message)}
 }
 
 // Activar / desactivar trabajador. Inactivo = fuera de selectores, pendientes y
@@ -2403,7 +2595,7 @@ function getInfFiltros(){
 }
 
 function filtrarRegistros(f){
-  const ws=pWs();
+  const ws=wsZonaConPrestados();
   return rCache.filter(r=>{
     if(r.fecha<f.desde||r.fecha>f.hasta)return false;
     if(f.subjefe){const w=ws.find(x=>x.id===r.workerId);if(!w||w.subjefe!==f.subjefe)return false}
@@ -2652,7 +2844,7 @@ async function generarInforme(tipo){
   const msg=document.getElementById('infMsg');msg.textContent='⏳ Generando…';
   try{
     const regs=filtrarRegistros(f);
-    const ws=pWs();
+    const ws=wsZonaConPrestados();
     const wb=XLSX.utils.book_new();
     let nombre='';
     let datos;
@@ -2694,7 +2886,7 @@ async function generarInformeCompleto(){
   const msg=document.getElementById('infMsg');msg.textContent='⏳ Generando informe completo…';
   try{
     const regs=filtrarRegistros(f);
-    const ws=pWs();
+    const ws=wsZonaConPrestados();
     const progs=await fetchProgramaciones(f);
     const wb=XLSX.utils.book_new();
     // Hoja resumen
@@ -2761,7 +2953,7 @@ async function generarDashboard(){
   const msg=document.getElementById('infMsg');msg.textContent='⏳ Generando dashboard…';
   try{
     const regs=filtrarRegistros(f);
-    const ws=pWs();
+    const ws=wsZonaConPrestados();
     if(!regs.length){msg.textContent='⚠️ No hay datos en el rango seleccionado';return}
     const hj=cfgGlobal.horasJornada||8;
     // KPIs
@@ -2852,7 +3044,7 @@ ${cfgGlobal.costoJornada?'':'<p class="note">ℹ️ Costo jornada no configurado
 function renderInfCharts(){
   const f=getInfFiltros();if(!f)return;
   const regs=filtrarRegistros(f);
-  const ws=pWs();
+  const ws=wsZonaConPrestados();
   const div=document.getElementById('infCharts');
   if(!regs.length){div.innerHTML=`<div class="card"><div class="empty"><div class="empty-icon">📊</div><div>Sin registros en el rango seleccionado</div></div></div>`;return}
   // Horas por encargado (con costo)
