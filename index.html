@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-15-4';
+const APP_V = '2026-09-15-5';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -546,7 +546,7 @@ select:focus,input:focus{border-color:var(--green)}
         <button class="btn btn-primary" id="dotacionBtn" onclick="aplicarDotacion202609()">Cargar dotación definitiva</button>
         <div class="sec-div">Depurar trabajadores</div>
         <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Revisa las 3 zonas y deja <b>activos solo a los encargados de la planilla</b>, cada uno una vez y en la zona de su subjefe. Repetidos, nombres antiguos y personas fuera de la planilla quedan inactivos (⏸, no se borran). Muestra el detalle antes de aplicar. Se puede usar cuantas veces sea necesario.</p>
-        <button class="btn btn-secondary" onclick="revisarDepuracion()">🧹 Revisar repetidos y depurar</button>
+        <button class="btn btn-secondary" onclick="revisarDepuracion()">🧹 Revisar repetidos, depurar y unir historial</button>
       </div>
     </div>
     <!-- usuarios del sistema (solo admin) -->
@@ -2254,7 +2254,7 @@ async function renderConfig(){
   const wOrden=[...sortWs(wActivos(wMap[activePred])),...sortWs((wMap[activePred]||[]).filter(w=>!esActivo(w)))];
   document.getElementById('wList').innerHTML=wOrden.length
     ?wOrden.map(w=>{const inact=!esActivo(w);return `<div class="wrow" style="${inact?'opacity:.5':''}">
-        <div><div class="wn">${wDisplay(w)}${inact?' <span class="role-badge" style="background:var(--sand);color:var(--muted)">Inactivo</span>':''}</div><div class="wm">${w.codigo||'—'} · ${w.subjefe}${w.plantas?` · ${w.plantas}pl`:''}</div></div>
+        <div><div class="wn">${wDisplay(w)}${inact?' <span class="role-badge" style="background:var(--sand);color:var(--muted)">Inactivo</span>':''}</div><div class="wm">${w.codigo||'—'} · ${w.subjefe}${w.plantas?` · ${w.plantas}pl`:''}${w.consolidadoEn?` · 🔗 unido a ${(()=>{const k=wById(w.consolidadoEn,w.consolidadoZona);return k?wDisplay(k):'otro'})()}`:''}</div></div>
         <div style="display:flex;gap:4px;flex-shrink:0">
           <button class="btn ${inact?'btn-primary':'btn-warn'} btn-sm" onclick="toggleActivoW('${w.id}')" title="${inact?'Reactivar':'Dejar inactivo'}">${inact?'▶':'⏸'}</button><button class="btn btn-secondary btn-sm" onclick="modalEditarW('${w.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="delW('${w.id}')">✕</button>
         </div>
@@ -2380,8 +2380,25 @@ async function aplicarDotacion202609(){
 // nombre completo (sin mayúsculas/tildes). Si hay varios, conserva el de la carga oficial o el
 // que tenga más registros; si no hay, lo crea. Todo lo demás activo en las 3 zonas se inactiva.
 let planDepu=null;
-const normNom=t=>String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zñ\- ]/g,' ').replace(/\s+/g,' ').trim();
+const normNom=t=>String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z\- ]/g,' ').replace(/\s+/g,' ').trim();
 function nomCompletoW(w){const sp=wSplit(w);return normNom(sp.nombres+' '+sp.apellidos)}
+// "fonética" simple para comparar escrituras: Espinosa/Espinoza, Cristian/Christian, Wuildor/Wildor
+const fonNom=t=>normNom(t).replace(/h/g,'').replace(/z/g,'s').replace(/v/g,'b').replace(/y/g,'i').replace(/(.)\1+/g,'$1');
+function levD(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;let prev=Array.from({length:n+1},(_,j)=>j);for(let i=1;i<=m;i++){const cur=[i];for(let j=1;j<=n;j++)cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));prev=cur}return prev[n]}
+// 3 = mismo nombre completo · 2 = mismo nombre y primer apellido (con leves diferencias de escritura)
+// 1 = coincide nombre y primer apellido pero el segundo apellido es distinto (revisar) · 0 = no
+function scorePersona(w,d){
+  const sp=wSplit(w);
+  if(normNom(sp.nombres+' '+sp.apellidos)===normNom(d.n+' '+d.a))return 3;
+  const on=fonNom(sp.nombres).split(' ').filter(Boolean),os=fonNom(sp.apellidos).split(' ').filter(Boolean);
+  const nn=fonNom(d.n).split(' ').filter(Boolean),ns=fonNom(d.a).split(' ').filter(Boolean);
+  if(!on.length||!os.length||!nn.length||!ns.length)return 0;
+  const dn=levD(on[0],nn[0]);
+  const nombreOk=dn<=1||(dn<=2&&on[0].length>=6&&nn[0].length>=6);
+  if(!nombreOk||levD(os[0],ns[0])>1)return 0;
+  if(os[1]&&ns[1]&&levD(os[1],ns[1])>1)return 1;
+  return 2;
+}
 async function revisarDepuracion(){
   if(!isAdmin()){toast('Solo administradores');return}
   const subToZ={};PRED_ORDER.forEach(z=>PREDIOS[z].subjefes.forEach(sj=>subToZ[sj]=z));
@@ -2396,27 +2413,49 @@ async function revisarDepuracion(){
   loading(false);
   const nReg={};
   rsnaps.forEach(sn=>sn.docs.forEach(d=>{const r=d.data();if(r.workerId)nReg[r.workerId]=(nReg[r.workerId]||0)+1}));
-  const plan={};
+  const plan={},keepers=[],todos=[];
   PRED_ORDER.forEach((z,i)=>{
-    const ws=wsnaps[i].docs.map(d=>({id:d.id,...d.data()}));
+    const ws=wsnaps[i].docs.map(d=>({id:d.id,z,...d.data()}));
+    todos.push(...ws);
     const P={keep:[],reactivar:[],ajustar:[],inact:[],crear:[],total:ws.length};
     const usados=new Set();
     DOTACION_2026_09.filter(d=>subToZ[d.s]===z).forEach(d=>{
       const key=normNom(d.n+' '+d.a);
-      const cands=ws.filter(w=>!usados.has(w.id)&&nomCompletoW(w)===key);
-      if(!cands.length){P.crear.push(d);return}
+      const cands=ws.filter(w=>!usados.has(w.id)&&!w.consolidadoEn&&nomCompletoW(w)===key);
+      if(!cands.length){
+        const newId=colWorkers(z).doc().id;   // id definido antes de crear, para poder unir historial
+        P.crear.push({...d,newId});keepers.push({id:newId,z,d});return;
+      }
       cands.sort((a,b)=>((b.origen==='dotacion-2026-09')-(a.origen==='dotacion-2026-09'))||((b.activo!==false)-(a.activo!==false))||((nReg[b.id]||0)-(nReg[a.id]||0)));
       const w=cands[0];usados.add(w.id);
-      P.keep.push(w);
+      P.keep.push(w);keepers.push({id:w.id,z,d});
       if(w.activo===false)P.reactivar.push(w);
       if(w.subjefe!==d.s||(w.plantas||0)!==d.p)P.ajustar.push({w,d});
     });
     ws.filter(w=>w.activo!==false&&!usados.has(w.id)).forEach(w=>P.inact.push(w));
     plan[z]=P;
   });
-  planDepu=plan;
+  // Propuestas para unir historial: cada trabajador que NO queda (activo o ya inactivo) y se parece a un encargado de la planilla
+  const keepIds=new Set(keepers.map(k=>k.id));
+  const pares=[];
+  todos.filter(w=>!keepIds.has(w.id)&&!w.consolidadoEn).forEach(w=>{
+    let best=[],bs=0;
+    keepers.forEach(k=>{const sc=scorePersona(w,k.d);if(sc>bs){bs=sc;best=[k]}else if(sc&&sc===bs)best.push(k)});
+    if(!bs)return;
+    let k=best[0],ambiguo=false;
+    if(best.length>1){const mismaZ=best.filter(x=>x.z===w.z);if(mismaZ.length===1)k=mismaZ[0];else ambiguo=true}
+    const notas=[];
+    if(bs===1)notas.push('segundo apellido distinto');
+    if(k.z!==w.z)notas.push('otra zona');
+    if(ambiguo)notas.push('varias coincidencias');
+    const marcado=!ambiguo&&(bs===3||(bs===2&&k.z===w.z));
+    pares.push({old:w,k,score:bs,notas,marcado});
+  });
+  pares.sort((a,b)=>(b.marcado-a.marcado)||a.k.d.a.localeCompare(b.k.d.a));
+  planDepu={plan,pares};
   const lista=(arr,fn)=>arr.length?`<div style="font-size:11px;line-height:1.5;margin:3px 0 6px;color:var(--text)">${arr.map(fn).join(' · ')}</div>`:'';
   const tot=k=>PRED_ORDER.reduce((s,z)=>s+plan[z][k].length,0);
+  const hayCambios=(tot('inact')+tot('crear')+tot('reactivar')+tot('ajustar'))>0;
   document.getElementById('modalContent').innerHTML=`
     <div class="modal-title">🧹 Depurar trabajadores</div>
     <div class="modal-sub">Quedarán activos ${DOTACION_2026_09.length} encargados (planilla definitiva). Nada se borra: los inactivos conservan su historial.</div>
@@ -2429,35 +2468,65 @@ async function revisarDepuracion(){
       ${lista(P.crear,d=>escH(d.a+', '+d.n))}
       ${P.ajustar.length?`<div style="font-size:12px">✏️ Se corrige subjefe/plantas: <b>${P.ajustar.length}</b></div>`:''}
     </div>`}).join('')}
-    ${(tot('inact')+tot('crear')+tot('reactivar')+tot('ajustar'))
-      ?`<button class="btn btn-primary" onclick="aplicarDepuracion()">Aplicar (${tot('inact')} inactivar · ${tot('crear')} crear)</button>`
+    <div class="card" style="padding:10px 12px;margin-bottom:8px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">🔗 Unir historial de nombres repetidos: ${pares.length}</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.45;margin-bottom:6px">Los registros, reemplazos y fotos del nombre antiguo pasan al encargado de la planilla. Marcados: mismo nombre completo, o mismo nombre y apellido en la misma zona. <b>Revisa los no marcados</b> (otra zona, segundo apellido distinto o varias coincidencias) y márcalos solo si es la misma persona. Registros = últimos 1500 por zona.</div>
+      ${pares.length?pares.map((pr,i)=>`<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;text-transform:none;letter-spacing:0;font-weight:400;color:var(--text);padding:5px 0;border-top:1px solid var(--sand);cursor:pointer">
+        <input type="checkbox" class="depuPar" data-i="${i}" ${pr.marcado?'checked':''} style="width:16px;height:16px;margin-top:1px;accent-color:var(--green)">
+        <span><b>${escH(wDisplay(pr.old))}</b> <span style="color:var(--muted)">(${PREDIOS[pr.old.z].nombre}${nReg[pr.old.id]?` · ${nReg[pr.old.id]} reg.`:' · sin reg.'}${pr.old.activo===false?' · inactivo':''})</span><br>→ ${escH(pr.k.d.a+', '+pr.k.d.n)} <span style="color:var(--muted)">(${PREDIOS[pr.k.z].nombre})</span>${pr.notas.length?` <span style="color:#B45309;font-weight:600">⚠️ ${pr.notas.join(', ')}</span>`:''}</span>
+      </label>`).join(''):'<div style="font-size:12px;color:var(--muted)">No se encontraron nombres parecidos.</div>'}
+    </div>
+    ${(hayCambios||pares.length)
+      ?`<button class="btn btn-primary" onclick="aplicarDepuracion()">Aplicar${hayCambios?` (${tot('inact')} inactivar · ${tot('crear')} crear)`:''} y unir marcados</button>`
       :`<div style="font-size:13px;color:var(--green);font-weight:600;margin:6px 0">✅ No hay nada que corregir</div>`}
     <button class="btn btn-secondary" style="margin-top:8px" onclick="closeModal()">Cerrar</button>`;
   document.getElementById('overlay').classList.add('open');
 }
+async function commitOps(ops,txt){
+  for(let i=0;i<ops.length;i+=400){
+    const b=db.batch();ops.slice(i,i+400).forEach(fn=>fn(b));
+    loading(true,`${txt} ${Math.min(i+400,ops.length)} / ${ops.length}`);
+    await b.commit();
+  }
+}
 async function aplicarDepuracion(){
   if(!planDepu)return;
+  const {plan,pares}=planDepu;
+  const marcados=[...document.querySelectorAll('.depuPar')].filter(c=>c.checked).map(c=>pares[+c.dataset.i]);
   const ops=[];
   PRED_ORDER.forEach(z=>{
-    const P=planDepu[z];
+    const P=plan[z];
     P.inact.forEach(w=>ops.push(b=>b.update(colWorkers(z).doc(w.id),{activo:false})));
     P.reactivar.forEach(w=>ops.push(b=>b.update(colWorkers(z).doc(w.id),{activo:true})));
     P.ajustar.forEach(({w,d})=>ops.push(b=>b.update(colWorkers(z).doc(w.id),{subjefe:d.s,plantas:d.p})));
-    P.crear.forEach(d=>ops.push(b=>b.set(colWorkers(z).doc(),{nombre:d.n+' '+d.a,nombres:d.n,apellidos:d.a,codigo:'',subjefe:d.s,plantas:d.p,activo:true,origen:'dotacion-2026-09'})));
+    P.crear.forEach(d=>ops.push(b=>b.set(colWorkers(z).doc(d.newId),{nombre:d.n+' '+d.a,nombres:d.n,apellidos:d.a,codigo:'',subjefe:d.s,plantas:d.p,activo:true,origen:'dotacion-2026-09'})));
   });
   closeModal();
   loading(true,'Depurando…');
   try{
-    for(let i=0;i<ops.length;i+=400){
-      const b=db.batch();ops.slice(i,i+400).forEach(fn=>fn(b));
-      loading(true,`Depurando… ${Math.min(i+400,ops.length)} / ${ops.length}`);
-      await b.commit();
+    if(ops.length)await commitOps(ops,'Depurando trabajadores…');
+    // Unir historial: registros, reemplazos y fotos del id antiguo → id del encargado de la planilla
+    let nR=0,nRe=0,nF=0;const ops2=[];
+    for(let i=0;i<marcados.length;i++){
+      const pr=marcados[i];
+      loading(true,`Buscando historial ${i+1} / ${marcados.length}…`);
+      const res=await Promise.all(PRED_ORDER.flatMap(z=>[
+        colRegistros(z).where('workerId','==',pr.old.id).get(),
+        colRegistros(z).where('reemplazoWorkerId','==',pr.old.id).get(),
+        colFotos(z).where('workerId','==',pr.old.id).get()]));
+      PRED_ORDER.forEach((z,j)=>{
+        res[j*3].docs.forEach(d=>{ops2.push(b=>b.update(d.ref,{workerId:pr.k.id}));nR++});
+        res[j*3+1].docs.forEach(d=>{ops2.push(b=>b.update(d.ref,{reemplazoWorkerId:pr.k.id,reemplazoPredioId:pr.k.z}));nRe++});
+        res[j*3+2].docs.forEach(d=>{ops2.push(b=>b.update(d.ref,{workerId:pr.k.id}));nF++});
+      });
+      ops2.push(b=>b.update(colWorkers(pr.old.z).doc(pr.old.id),{activo:false,consolidadoEn:pr.k.id,consolidadoZona:pr.k.z}));
     }
-    const nI=PRED_ORDER.reduce((s,z)=>s+planDepu[z].inact.length,0),nC=PRED_ORDER.reduce((s,z)=>s+planDepu[z].crear.length,0);
+    if(ops2.length)await commitOps(ops2,'Uniendo historial…');
+    const nI=PRED_ORDER.reduce((s,z)=>s+plan[z].inact.length,0),nC=PRED_ORDER.reduce((s,z)=>s+plan[z].crear.length,0);
     planDepu=null;
     await loadPredioData(activePred);
     renderConfig();
-    toast(`✅ Depuración lista: ${nI} inactivados · ${nC} creados`);
+    toast(`✅ ${nI} inactivados · ${nC} creados · ${marcados.length} unidos (${nR} registros, ${nRe} reemplazos, ${nF} fotos)`);
   }catch(e){loading(false);toast('Error: '+e.message)}
 }
 
