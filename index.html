@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-15-1';
+const APP_V = '2026-09-15-2';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -1095,11 +1095,23 @@ function renderCtx(){['ctx0','ctx2','ctx-prog'].forEach(id=>{const el=document.g
 // ── Selector de época/ciclo al registrar ──
 // Cuando la zona tiene 2+ ciclos vigentes en la fecha (ej. invierno + primor),
 // aparece un selector para indicar a cuál época pertenece la labor registrada.
+// Los ciclos son del SECTOR/ZONA donde se hace la labor (pestaña activa), no del subjefe
+// "de origen" del trabajador: los trabajadores son compartidos y su campo subjefe puede ser
+// de otra zona o un nombre antiguo. Antes se usaba w.subjefe y, si no coincidía con el
+// subjefe de la zona, el selector de época se borraba al elegir trabajador y el registro
+// quedaba sin ciclo (bug 2026-09-15).
 function subjefeParaCiclos(){
+  const subs=pD().subjefes;
+  const selSubEl=document.getElementById('selSub');
+  const s=selSubEl?selSubEl.value:'';
+  if(s&&subs.includes(s))return s;
   const selWEl=document.getElementById('selW');
   const wId=selWEl?selWEl.value:'';
   const w=wId?pWs().find(x=>x.id===wId):null;
-  return (w&&w.subjefe)||pD().subjefes[0];
+  if(w&&w.subjefe&&subs.includes(w.subjefe))return w.subjefe;
+  const us=userSubjefe();
+  if(us&&subs.includes(us))return us;
+  return subs[0];
 }
 function cicloLabel(c){return `${TICONS[c.temporada]} ${TNAMES[c.temporada]}${c.sector?' · '+c.sector:''} (desde ${fDMY(c.inicio)})`}
 function updateCicloSel(){
@@ -1532,6 +1544,7 @@ async function guardar(){
     const elegido=document.getElementById('selCiclo').value;
     if(!elegido&&!skipLabores){toast('⚠️ Elige la época/ciclo de esta labor (hay '+csVig.length+' abiertas)');return}
     const c=csVig.find(x=>x.id===elegido);
+    if(!c&&!skipLabores){toast('⚠️ La época elegida no corresponde a este sector. Vuelve a elegirla');updateCicloSel();return}
     if(c){cicloId=c.id;cicloTemporada=c.temporada;cicloSector=c.sector||null;}
   }else if(csVig.length===1){
     cicloId=csVig[0].id;cicloTemporada=csVig[0].temporada;cicloSector=csVig[0].sector||null;
@@ -1655,14 +1668,18 @@ function selloFoto(w,labores,obs,ausente,tipo){
     `Registró: ${quien} · Guardado: ${fHora(Date.now())}`
   ];
 }
+let fotosOcupado=false;
 async function addFotos(input){
   const files=[...(input.files||[])];input.value='';
   if(!files.length)return;
+  if(fotosOcupado){toast('⏳ Espera a que termine de procesar la foto anterior');return}
   const libres=FOTO_MAX-fotosPend.length;
   if(files.length>libres)toast(`⚠️ Máximo ${FOTO_MAX} fotos por registro`);
+  fotosOcupado=true;
   loading(true,'Procesando foto…');
   try{
     for(const f of files.slice(0,Math.max(0,libres))){
+      if(fotosPend.length>=FOTO_MAX)break;
       const url=URL.createObjectURL(f);
       try{
         const img=await cargarImg(url);
@@ -1670,6 +1687,7 @@ async function addFotos(input){
       }finally{URL.revokeObjectURL(url);}
     }
   }catch(e){toast('Error: '+e.message)}
+  fotosOcupado=false;
   loading(false);
   updFotoUI();
 }
