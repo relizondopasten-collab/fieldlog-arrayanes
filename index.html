@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-15-3';
+const APP_V = '2026-09-15-4';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -544,6 +544,9 @@ select:focus,input:focus{border-color:var(--green)}
         <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Carga los encargados de la planilla definitiva, cada uno en la zona de su subjefe y con sus plantas. <b>Todos los trabajadores actuales quedan inactivos (⏸)</b>: no se borran y el historial conserva sus nombres. Se aplica una sola vez.</p>
         <div id="dotacionEstado" style="font-size:12px;margin-bottom:9px"></div>
         <button class="btn btn-primary" id="dotacionBtn" onclick="aplicarDotacion202609()">Cargar dotación definitiva</button>
+        <div class="sec-div">Depurar trabajadores</div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Revisa las 3 zonas y deja <b>activos solo a los encargados de la planilla</b>, cada uno una vez y en la zona de su subjefe. Repetidos, nombres antiguos y personas fuera de la planilla quedan inactivos (⏸, no se borran). Muestra el detalle antes de aplicar. Se puede usar cuantas veces sea necesario.</p>
+        <button class="btn btn-secondary" onclick="revisarDepuracion()">🧹 Revisar repetidos y depurar</button>
       </div>
     </div>
     <!-- usuarios del sistema (solo admin) -->
@@ -2369,6 +2372,92 @@ async function aplicarDotacion202609(){
     await loadPredioData(activePred);
     renderConfig();
     toast(`✅ Dotación cargada: ${DOTACION_2026_09.length} encargados · ${aInactivar.length} inactivados`);
+  }catch(e){loading(false);toast('Error: '+e.message)}
+}
+
+// ── Depuración: deja activos exactamente los encargados de DOTACION_2026_09 ──
+// Para cada persona de la planilla busca, en la zona de su subjefe, un trabajador con el mismo
+// nombre completo (sin mayúsculas/tildes). Si hay varios, conserva el de la carga oficial o el
+// que tenga más registros; si no hay, lo crea. Todo lo demás activo en las 3 zonas se inactiva.
+let planDepu=null;
+const normNom=t=>String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zñ\- ]/g,' ').replace(/\s+/g,' ').trim();
+function nomCompletoW(w){const sp=wSplit(w);return normNom(sp.nombres+' '+sp.apellidos)}
+async function revisarDepuracion(){
+  if(!isAdmin()){toast('Solo administradores');return}
+  const subToZ={};PRED_ORDER.forEach(z=>PREDIOS[z].subjefes.forEach(sj=>subToZ[sj]=z));
+  loading(true,'Revisando trabajadores de las 3 zonas…');
+  let wsnaps,rsnaps;
+  try{
+    [wsnaps,rsnaps]=await Promise.all([
+      Promise.all(PRED_ORDER.map(z=>colWorkers(z).get())),
+      Promise.all(PRED_ORDER.map(z=>colRegistros(z).orderBy('ts','desc').limit(1500).get()))
+    ]);
+  }catch(e){loading(false);toast('Error: '+e.message);return}
+  loading(false);
+  const nReg={};
+  rsnaps.forEach(sn=>sn.docs.forEach(d=>{const r=d.data();if(r.workerId)nReg[r.workerId]=(nReg[r.workerId]||0)+1}));
+  const plan={};
+  PRED_ORDER.forEach((z,i)=>{
+    const ws=wsnaps[i].docs.map(d=>({id:d.id,...d.data()}));
+    const P={keep:[],reactivar:[],ajustar:[],inact:[],crear:[],total:ws.length};
+    const usados=new Set();
+    DOTACION_2026_09.filter(d=>subToZ[d.s]===z).forEach(d=>{
+      const key=normNom(d.n+' '+d.a);
+      const cands=ws.filter(w=>!usados.has(w.id)&&nomCompletoW(w)===key);
+      if(!cands.length){P.crear.push(d);return}
+      cands.sort((a,b)=>((b.origen==='dotacion-2026-09')-(a.origen==='dotacion-2026-09'))||((b.activo!==false)-(a.activo!==false))||((nReg[b.id]||0)-(nReg[a.id]||0)));
+      const w=cands[0];usados.add(w.id);
+      P.keep.push(w);
+      if(w.activo===false)P.reactivar.push(w);
+      if(w.subjefe!==d.s||(w.plantas||0)!==d.p)P.ajustar.push({w,d});
+    });
+    ws.filter(w=>w.activo!==false&&!usados.has(w.id)).forEach(w=>P.inact.push(w));
+    plan[z]=P;
+  });
+  planDepu=plan;
+  const lista=(arr,fn)=>arr.length?`<div style="font-size:11px;line-height:1.5;margin:3px 0 6px;color:var(--text)">${arr.map(fn).join(' · ')}</div>`:'';
+  const tot=k=>PRED_ORDER.reduce((s,z)=>s+plan[z][k].length,0);
+  document.getElementById('modalContent').innerHTML=`
+    <div class="modal-title">🧹 Depurar trabajadores</div>
+    <div class="modal-sub">Quedarán activos ${DOTACION_2026_09.length} encargados (planilla definitiva). Nada se borra: los inactivos conservan su historial.</div>
+    ${PRED_ORDER.map(z=>{const P=plan[z];return `<div class="card" style="padding:10px 12px;margin-bottom:8px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">${PREDIOS[z].nombre} · ${PREDIOS[z].subjefes.join(', ')}</div>
+      <div style="font-size:12px">✅ Se mantienen: <b>${P.keep.length}</b>${P.reactivar.length?` (${P.reactivar.length} se reactivan)`:''}</div>
+      <div style="font-size:12px;margin-top:4px">⏸ Se inactivan: <b>${P.inact.length}</b></div>
+      ${lista(P.inact,w=>`${escH(wDisplay(w))}${nReg[w.id]?` <span style="color:var(--muted)">(${nReg[w.id]} reg.)</span>`:''}`)}
+      <div style="font-size:12px">＋ Se crean: <b>${P.crear.length}</b></div>
+      ${lista(P.crear,d=>escH(d.a+', '+d.n))}
+      ${P.ajustar.length?`<div style="font-size:12px">✏️ Se corrige subjefe/plantas: <b>${P.ajustar.length}</b></div>`:''}
+    </div>`}).join('')}
+    ${(tot('inact')+tot('crear')+tot('reactivar')+tot('ajustar'))
+      ?`<button class="btn btn-primary" onclick="aplicarDepuracion()">Aplicar (${tot('inact')} inactivar · ${tot('crear')} crear)</button>`
+      :`<div style="font-size:13px;color:var(--green);font-weight:600;margin:6px 0">✅ No hay nada que corregir</div>`}
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeModal()">Cerrar</button>`;
+  document.getElementById('overlay').classList.add('open');
+}
+async function aplicarDepuracion(){
+  if(!planDepu)return;
+  const ops=[];
+  PRED_ORDER.forEach(z=>{
+    const P=planDepu[z];
+    P.inact.forEach(w=>ops.push(b=>b.update(colWorkers(z).doc(w.id),{activo:false})));
+    P.reactivar.forEach(w=>ops.push(b=>b.update(colWorkers(z).doc(w.id),{activo:true})));
+    P.ajustar.forEach(({w,d})=>ops.push(b=>b.update(colWorkers(z).doc(w.id),{subjefe:d.s,plantas:d.p})));
+    P.crear.forEach(d=>ops.push(b=>b.set(colWorkers(z).doc(),{nombre:d.n+' '+d.a,nombres:d.n,apellidos:d.a,codigo:'',subjefe:d.s,plantas:d.p,activo:true,origen:'dotacion-2026-09'})));
+  });
+  closeModal();
+  loading(true,'Depurando…');
+  try{
+    for(let i=0;i<ops.length;i+=400){
+      const b=db.batch();ops.slice(i,i+400).forEach(fn=>fn(b));
+      loading(true,`Depurando… ${Math.min(i+400,ops.length)} / ${ops.length}`);
+      await b.commit();
+    }
+    const nI=PRED_ORDER.reduce((s,z)=>s+planDepu[z].inact.length,0),nC=PRED_ORDER.reduce((s,z)=>s+planDepu[z].crear.length,0);
+    planDepu=null;
+    await loadPredioData(activePred);
+    renderConfig();
+    toast(`✅ Depuración lista: ${nI} inactivados · ${nC} creados`);
   }catch(e){loading(false);toast('Error: '+e.message)}
 }
 
