@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-10-5';
+const APP_V = '2026-09-15-1';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -414,7 +414,21 @@ select:focus,input:focus{border-color:var(--green)}
         <div id="laborRows"></div>
         <button id="addLaborBtn" class="btn btn-secondary" style="margin-top:6px;padding:8px;font-size:12px" onclick="addLaborRow()">＋ Agregar labor</button>
       </div>
-      <div class="form-row" style="margin-top:8px"><label>Observación</label><input type="text" id="iO" placeholder="Notas adicionales…"></div>
+      <div class="form-row" style="margin-top:8px"><label>Observación</label><input type="text" id="iO" placeholder="Notas adicionales…" oninput="updFotoUI()"></div>
+      <div id="fotoSec" style="display:none;margin:-2px 0 10px;background:var(--cream);border:1.5px dashed var(--sand);border-radius:11px;padding:9px 11px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <label style="margin:0">📷 Fotos de respaldo (opcional)</label>
+          <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)" id="fotoCnt">0 / 3</span>
+        </div>
+        <div id="fotoThumbs" style="display:flex;gap:7px;flex-wrap:wrap"></div>
+        <div id="fotoAviso" style="display:none;font-size:11px;color:var(--red);margin-top:6px">Escribe la observación para poder guardar las fotos.</div>
+        <div id="fotoBtns" style="display:flex;gap:7px;margin-top:7px">
+          <button type="button" class="btn btn-secondary" style="padding:8px;font-size:12px" onclick="document.getElementById('fotoCam').click()">📷 Tomar foto</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px;font-size:12px" onclick="document.getElementById('fotoGal').click()">🖼 Galería</button>
+        </div>
+        <input type="file" id="fotoCam" accept="image/*" capture="environment" style="display:none" onchange="addFotos(this)">
+        <input type="file" id="fotoGal" accept="image/*" multiple style="display:none" onchange="addFotos(this)">
+      </div>
       <button class="btn btn-primary" onclick="guardar()">＋ Guardar Entrada</button>
     </div>
     <div id="hoy"></div>
@@ -583,6 +597,17 @@ select:focus,input:focus{border-color:var(--green)}
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-handle"></div>
     <div id="modalContent"></div>
+  </div>
+</div>
+
+<!-- VISOR DE FOTOS -->
+<div id="fotoViewer" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:500;overflow-y:auto;padding:14px 12px 40px" onclick="cerrarFotos()">
+  <div style="max-width:720px;margin:0 auto" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;position:sticky;top:-14px;background:rgba(0,0,0,.92);padding:8px 0">
+      <div id="fotoViewerTit" style="color:#fff;font-size:13px;font-weight:600"></div>
+      <button type="button" onclick="cerrarFotos()" style="background:#fff;border:none;border-radius:50%;width:34px;height:34px;font-size:16px;cursor:pointer">✕</button>
+    </div>
+    <div id="fotoViewerBody"></div>
   </div>
 </div>
 
@@ -756,6 +781,8 @@ const colRegistros= pid => db.collection('arr_registros').doc(pid).collection('e
 const colCiclos   = (pid,sub) => db.collection('arr_ciclos').doc(pid+'_'+sub).collection('cycles');
 const colProg     = (pid,sub) => db.collection('arr_programacion').doc(pid).collection('subjefes').doc(sub).collection('semanas');
 const colUsers    = () => db.collection('arr_users');
+// Fotos de respaldo de observaciones: colección aparte para no cargar el listener de registros
+const colFotos    = pid => db.collection('arr_fotos').doc(pid).collection('items');
 
 // ══════════════════════════════════════════════
 // APP STATE
@@ -1426,7 +1453,8 @@ function eHTML(e,pred=activePred){
       ${totalM?`<span class="badge bm">🪴 ${totalM} mesas</span>`:''}
     </div>
     <div style="border-top:1px solid var(--sand);padding-top:6px">${laborLines}</div>
-    ${e.obs?`<div style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:5px;border-top:1px solid var(--sand)">📌 ${e.obs}</div>`:''}
+    ${(e.obs||e.fotos)?`<div style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:5px;border-top:1px solid var(--sand)">${e.obs?'📌 '+e.obs:''}
+      ${e.fotos?`<div><button type="button" class="btn btn-sm btn-secondary" style="margin-top:5px" onclick="verFotos('${e.id}','${pred}')">📷 Ver ${e.fotos} foto${e.fotos>1?'s':''}</button></div>`:''}</div>`:''}
   </div>`;
 }
 
@@ -1439,6 +1467,7 @@ async function guardar(){
   const ausente=document.getElementById('chkAusente').checked;
   const reemplazoVal=document.getElementById('selReemplazo').value;
   if(!wId){toast('⚠️ Selecciona un trabajador');return}
+  if(fotosPend.length&&!obs){toast('⚠️ Escribe la observación para guardar las fotos');return}
   const tipoSel=document.querySelector('input[name="tipoAusencia"]:checked');
   const tipo=ausente?(tipoSel?tipoSel.value:'sin'):null;
   const cfgAus=tipo?(TIPO_AUS[tipo]||TIPO_AUS.sin):null;
@@ -1509,18 +1538,42 @@ async function guardar(){
   }
   loading(true,'Guardando…');
   try{
-    await colRegistros(activePred).add({fecha:selDate,workerId:wId,labores,obs,
+    // Fotos: se les imprime el sello de respaldo antes de guardar
+    const nFotos=fotosPend.length;
+    let fotosSell=[];
+    if(nFotos){
+      const w=pWs().find(x=>x.id===wId);
+      const sello=selloFoto(w,labores,obs,ausente,tipo);
+      for(const f of fotosPend){
+        const img=await cargarImg(f.data);
+        fotosSell.push({data:canvasJpeg(img,FOTO_LADO,FOTO_Q,[...sello,'Foto tomada: '+fHora(f.t)]),t:f.t});
+      }
+    }
+    const regRef=await colRegistros(activePred).add({fecha:selDate,workerId:wId,labores,obs,fotos:nFotos,
       cicloId,cicloTemporada,cicloSector,
       ausente:ausente||false,tipoAusencia:tipo,licencia:licencia||false,vacaciones:vacaciones||false,
       ausAM,ausPM,ausInicio,ausFin,reemplazoPredioId,reemplazoWorkerId,
       lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid});
+    let fotosOk=0,fotoErr='';
+    for(let i=0;i<fotosSell.length;i++){
+      try{
+        loading(true,`Subiendo foto ${i+1} de ${fotosSell.length}…`);
+        await colFotos(activePred).add({registroId:regRef.id,fecha:selDate,workerId:wId,idx:i,
+          data:fotosSell[i].data,tomada:fotosSell[i].t,ts:Date.now(),creadoPor:currentUser.uid});
+        fotosOk++;
+      }catch(err){fotoErr=err.message;}
+    }
+    if(fotosOk<nFotos){try{await regRef.update({fotos:fotosOk})}catch(_){}}
+    fotosPend=[];
     document.getElementById('iO').value='';
+    updFotoUI();
     document.getElementById('chkAusente').checked=false;
     resetAusenciaUI();
     document.getElementById('tipoAusenciaDiv').style.display='none';
     document.getElementById('ausenteSection').style.display='none';
     initLaborRows();
-    toast('✅ Entrada guardada');
+    if(fotosOk<nFotos){toast(`⚠️ Entrada guardada, pero ${nFotos-fotosOk} foto(s) no se subieron: ${fotoErr}`);}
+    else toast(nFotos?`✅ Entrada guardada con ${nFotos} foto${nFotos>1?'s':''}`:'✅ Entrada guardada');
   }catch(e){toast('Error: '+e.message)}
   loading(false);
 }
@@ -1528,10 +1581,117 @@ async function guardar(){
 async function delEntry(id){
   if(!confirm('¿Eliminar esta entrada?'))return;
   loading(true,'Eliminando…');
-  try{await colRegistros(activePred).doc(id).delete();toast('🗑 Eliminada')}
+  try{
+    await colRegistros(activePred).doc(id).delete();
+    // Borra también sus fotos de respaldo (si las hay)
+    try{const fs=await colFotos(activePred).where('registroId','==',id).get();await Promise.all(fs.docs.map(d=>d.ref.delete()));}catch(_){}
+    toast('🗑 Eliminada')}
   catch(e){toast('Error: '+e.message)}
   loading(false);
 }
+
+// ══════════════════════════════════════════════
+// FOTOS DE RESPALDO (observaciones)
+// Hasta 3 fotos opcionales por registro, solo si hay observación.
+// Se reducen en el teléfono y se guardan como JPEG base64 en arr_fotos/{zona}/items
+// (cada doc Firestore admite máx. 1 MiB; se apunta a < ~700 KB por foto).
+// ══════════════════════════════════════════════
+const FOTO_MAX=3, FOTO_LADO=1280, FOTO_Q=0.72;
+let fotosPend=[]; // [{data:dataURL sin sello, t:ms}]
+const fHora=ms=>{const d=new Date(ms);const z=n=>String(n).padStart(2,'0');return `${z(d.getDate())}/${z(d.getMonth()+1)}/${d.getFullYear()} ${z(d.getHours())}:${z(d.getMinutes())}`};
+function escH(t){return String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+function updFotoUI(){
+  const sec=document.getElementById('fotoSec');if(!sec)return;
+  const hasObs=document.getElementById('iO').value.trim().length>0;
+  sec.style.display=(hasObs||fotosPend.length)?'block':'none';
+  document.getElementById('fotoCnt').textContent=`${fotosPend.length} / ${FOTO_MAX}`;
+  document.getElementById('fotoBtns').style.display=fotosPend.length>=FOTO_MAX?'none':'flex';
+  document.getElementById('fotoAviso').style.display=(!hasObs&&fotosPend.length)?'block':'none';
+  document.getElementById('fotoThumbs').innerHTML=fotosPend.map((f,i)=>`
+    <div style="position:relative;width:74px;height:74px;border-radius:9px;overflow:hidden;border:1.5px solid var(--sand);background:#000">
+      <img src="${f.data}" style="width:100%;height:100%;object-fit:cover;display:block" alt="Foto ${i+1}">
+      <button type="button" onclick="quitarFoto(${i})" style="position:absolute;top:3px;right:3px;background:rgba(0,0,0,.65);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font-size:12px;line-height:22px;padding:0;cursor:pointer">✕</button>
+    </div>`).join('');
+}
+function quitarFoto(i){fotosPend.splice(i,1);updFotoUI();}
+
+function cargarImg(src){
+  return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>rej(new Error('No se pudo leer la imagen (formato no compatible)'));im.src=src;});
+}
+// Redimensiona a maxL px (lado mayor), imprime sello opcional y exporta JPEG < ~700 KB
+function canvasJpeg(img,maxL,q,sello){
+  let w=img.naturalWidth,h=img.naturalHeight;
+  const k=Math.min(1,maxL/Math.max(w,h));w=Math.round(w*k);h=Math.round(h*k);
+  const c=document.createElement('canvas');c.width=w;c.height=h;
+  const x=c.getContext('2d');x.drawImage(img,0,0,w,h);
+  if(sello&&sello.length){
+    const fs=Math.max(12,Math.round(Math.max(w,h)/48)),lh=Math.round(fs*1.3),pad=Math.round(fs*.6);
+    x.font=`600 ${fs}px -apple-system,Roboto,Arial,sans-serif`;
+    const lineas=[];
+    sello.forEach(t=>{
+      let cur='';
+      String(t).split(' ').forEach(p=>{const tt=cur?cur+' '+p:p;if(x.measureText(tt).width>w-pad*2&&cur){lineas.push(cur);cur=p}else cur=tt;});
+      if(cur)lineas.push(cur);
+    });
+    const bh=lh*lineas.length+pad*2;
+    x.fillStyle='rgba(0,0,0,.62)';x.fillRect(0,h-bh,w,bh);
+    x.fillStyle='#fff';x.textBaseline='top';
+    lineas.forEach((t,i)=>x.fillText(t,pad,h-bh+pad+i*lh));
+  }
+  let qq=q,d=c.toDataURL('image/jpeg',qq);
+  while(d.length>700000&&qq>0.35){qq-=0.1;d=c.toDataURL('image/jpeg',qq);}
+  return d;
+}
+function selloFoto(w,labores,obs,ausente,tipo){
+  const labTxt=(labores||[]).map(l=>{const li=laborInfo(l.laborId,LABOR_V);return l.laborId+(li?' '+li.d:'')}).join(' / ');
+  const quien=(currentProfile&&(currentProfile.nombre||currentProfile.email))||'';
+  const obsCorta=obs.length>140?obs.slice(0,140)+'…':obs;
+  return [
+    `FieldLog Los Arrayanes · ${PREDIOS[activePred].nombre} · Labor del ${fD(selDate)}`,
+    `Trabajador: ${w?wDisplay(w):'—'}${ausente?' (ausente'+(tipo&&TIPO_AUS[tipo]?': '+TIPO_AUS[tipo].t:'')+')':''}`,
+    ...(labTxt?[`Labores: ${labTxt}`]:[]),
+    `Obs: ${obsCorta}`,
+    `Registró: ${quien} · Guardado: ${fHora(Date.now())}`
+  ];
+}
+async function addFotos(input){
+  const files=[...(input.files||[])];input.value='';
+  if(!files.length)return;
+  const libres=FOTO_MAX-fotosPend.length;
+  if(files.length>libres)toast(`⚠️ Máximo ${FOTO_MAX} fotos por registro`);
+  loading(true,'Procesando foto…');
+  try{
+    for(const f of files.slice(0,Math.max(0,libres))){
+      const url=URL.createObjectURL(f);
+      try{
+        const img=await cargarImg(url);
+        fotosPend.push({data:canvasJpeg(img,FOTO_LADO,FOTO_Q,null),t:f.lastModified&&Math.abs(Date.now()-f.lastModified)<120000?f.lastModified:Date.now()});
+      }finally{URL.revokeObjectURL(url);}
+    }
+  }catch(e){toast('Error: '+e.message)}
+  loading(false);
+  updFotoUI();
+}
+async function verFotos(regId,pred){
+  loading(true,'Cargando fotos…');
+  try{
+    const snap=await colFotos(pred||activePred).where('registroId','==',regId).get();
+    const fotos=snap.docs.map(d=>d.data()).sort((a,b)=>(a.idx||0)-(b.idx||0));
+    if(!fotos.length){loading(false);toast('No se encontraron fotos para este registro');return}
+    const r=rCache.find(x=>x.id===regId);
+    const w=r?pWs().find(x=>x.id===r.workerId):null;
+    document.getElementById('fotoViewerTit').textContent=`📷 ${w?wDisplay(w):''}${r?' · '+fD(r.fecha):''}`;
+    document.getElementById('fotoViewerBody').innerHTML=(r&&r.obs?`<div style="color:#eee;font-size:12px;margin-bottom:10px">📌 ${escH(r.obs)}</div>`:'')+
+      fotos.map((f,i)=>`<div style="margin-bottom:14px">
+        <img src="${f.data}" style="width:100%;border-radius:10px;display:block" alt="Foto ${i+1}">
+        <a href="${f.data}" download="respaldo_${r?r.fecha:''}_${i+1}.jpg" style="display:inline-block;margin-top:6px;color:#fff;font-size:12px">⬇ Descargar foto ${i+1}</a>
+      </div>`).join('');
+    document.getElementById('fotoViewer').style.display='block';
+  }catch(e){toast('Error al cargar fotos: '+e.message)}
+  loading(false);
+}
+function cerrarFotos(){document.getElementById('fotoViewer').style.display='none';document.getElementById('fotoViewerBody').innerHTML='';}
 
 // ══════════════════════════════════════════════
 // AVANCE
