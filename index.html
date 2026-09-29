@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-29-2';
+const APP_V = '2026-09-29-3';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -556,6 +556,9 @@ select:focus,input:focus{border-color:var(--green)}
         <div class="sec-div">Depurar trabajadores</div>
         <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Revisa las 3 zonas y deja <b>activos solo a los encargados de la planilla</b>, cada uno una vez y en la zona de su subjefe. Repetidos, nombres antiguos y personas fuera de la planilla quedan inactivos (⏸, no se borran). Muestra el detalle antes de aplicar. Se puede usar cuantas veces sea necesario.</p>
         <button class="btn btn-secondary" onclick="revisarDepuracion()">🧹 Revisar repetidos, depurar y unir historial</button>
+        <div class="sec-div">Unir dos fichas de la misma persona</div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Para cuando una persona aparece dos veces (p. ej. con distinto segundo apellido). Eliges la ficha que <b>queda</b>, la que <b>se une</b> y el nombre final. Registros, reemplazos y fotos pasan a la ficha que queda; la otra queda inactiva (🔗, no se borra).</p>
+        <button class="btn btn-secondary" onclick="modalUnirW()">🔗 Unir dos trabajadores</button>
       </div>
     </div>
     <!-- usuarios del sistema (solo admin) -->
@@ -826,7 +829,7 @@ const DOTACION_2026_09=[
   {"n": "Patricia", "a": "Castillo Beiza", "p": 14000, "s": "Santiago Orrego"},
   {"n": "Otalus", "a": "Charles", "p": 14000, "s": "Santiago Orrego"},
   {"n": "Wildor", "a": "Derilus", "p": 14000, "s": "Mirta Peña"},
-  {"n": "Jimena", "a": "Leiva Mejias", "p": 9500, "s": "Mirta Peña"},
+  {"n": "Jimena", "a": "Leiva Parra", "p": 9500, "s": "Mirta Peña"},
   {"n": "Eugenia", "a": "Espinoza Moya", "p": 12000, "s": "Mirta Peña"},
   {"n": "Javier", "a": "Espinoza Pallero", "p": 12000, "s": "Mirta Peña"},
   {"n": "Patricio", "a": "Figueroa Cayul", "p": 12000, "s": "Santiago Orrego"},
@@ -2745,6 +2748,71 @@ async function aplicarDepuracion(){
     await loadPredioData(activePred);
     renderConfig();
     toast(`✅ ${nI} inactivados · ${nC} creados · ${marcados.length} unidos (${nR} registros, ${nRe} reemplazos, ${nF} fotos)`);
+  }catch(e){loading(false);toast('Error: '+e.message)}
+}
+
+// ── Unir manualmente dos fichas de la misma persona (admin) ──
+// La ficha que queda recibe el nombre final y el historial de la otra (registros, reemplazos, fotos);
+// la que se une queda {activo:false, consolidadoEn, consolidadoZona}. Nombre final = el que se escriba.
+function unirWLista(){
+  const out=[];PRED_ORDER.forEach(z=>(wMap[z]||[]).forEach(w=>{if(!w.consolidadoEn)out.push({...w,z})}));
+  return out.sort((a,b)=>wDisplay(a).localeCompare(wDisplay(b),'es',{sensitivity:'base'}));
+}
+function unirWOpt(w){return `<option value="${w.z}|${w.id}">${escH(wDisplay(w))} — ${escH(PREDIOS[w.z].nombre)} · ${escH(w.subjefe||'sin subjefe')}${esActivo(w)?'':' · inactivo'}</option>`}
+function modalUnirW(){
+  if(!isAdmin()){toast('Solo administradores');return}
+  const ws=unirWLista();
+  const opts='<option value="">— Elegir —</option>'+ws.map(unirWOpt).join('');
+  document.getElementById('modalContent').innerHTML=`
+    <div class="modal-title">🔗 Unir dos trabajadores</div>
+    <div class="modal-sub">Misma persona registrada dos veces. Nada se borra.</div>
+    <div class="form-row"><label>Ficha que QUEDA (normalmente la activa de la planilla)</label><select id="uwK" onchange="unirWPrefill()">${opts}</select></div>
+    <div class="form-row"><label>Ficha que SE UNE (queda inactiva)</label><select id="uwO">${opts}</select></div>
+    <div class="form-grid">
+      <div><label>Nombres final</label><input type="text" id="uwN"></div>
+      <div><label>Apellidos final</label><input type="text" id="uwA"></div>
+    </div>
+    <button class="btn btn-primary" onclick="aplicarUnirW()">Unir</button>
+    <button class="btn btn-secondary" style="margin-top:8px" onclick="closeModal()">Cancelar</button>`;
+  document.getElementById('overlay').classList.add('open');
+}
+function unirWPrefill(){
+  const v=document.getElementById('uwK').value;if(!v)return;
+  const [z,id]=v.split('|');const w=(wMap[z]||[]).find(x=>x.id===id);if(!w)return;
+  const sp=wSplit(w);document.getElementById('uwN').value=sp.nombres;document.getElementById('uwA').value=sp.apellidos;
+}
+async function aplicarUnirW(){
+  const vk=document.getElementById('uwK').value,vo=document.getElementById('uwO').value;
+  const nom=document.getElementById('uwN').value.trim(),ape=document.getElementById('uwA').value.trim();
+  if(!vk||!vo){toast('⚠️ Elige las dos fichas');return}
+  if(vk===vo){toast('⚠️ Son la misma ficha');return}
+  if(!nom||!ape){toast('⚠️ Ingresa nombres y apellidos finales');return}
+  const [kz,kid]=vk.split('|'),[oz,oid]=vo.split('|');
+  const k=(wMap[kz]||[]).find(x=>x.id===kid),o=(wMap[oz]||[]).find(x=>x.id===oid);
+  if(!k||!o){toast('⚠️ No se encontró la ficha');return}
+  if(!confirm(`¿Unir?\n\nQueda: ${wDisplay(k)} (${PREDIOS[kz].nombre}) → se llamará "${ape}, ${nom}"\nSe une: ${wDisplay(o)} (${PREDIOS[oz].nombre}) → queda inactiva\n\nSu historial pasa a la ficha que queda.`))return;
+  closeModal();
+  loading(true,'Buscando historial…');
+  try{
+    const res=await Promise.all(PRED_ORDER.flatMap(z=>[
+      colRegistros(z).where('workerId','==',oid).get(),
+      colRegistros(z).where('reemplazoWorkerId','==',oid).get(),
+      colFotos(z).where('workerId','==',oid).get()]));
+    let nR=0,nRe=0,nF=0;const ops=[];
+    PRED_ORDER.forEach((z,j)=>{
+      res[j*3].docs.forEach(d=>{ops.push(b=>b.update(d.ref,{workerId:kid}));nR++});
+      res[j*3+1].docs.forEach(d=>{ops.push(b=>b.update(d.ref,{reemplazoWorkerId:kid,reemplazoPredioId:kz}));nRe++});
+      res[j*3+2].docs.forEach(d=>{ops.push(b=>b.update(d.ref,{workerId:kid}));nF++});
+    });
+    // otras fichas que ya estaban unidas a la que se une → apuntan a la que queda
+    PRED_ORDER.forEach(z=>(wMap[z]||[]).filter(w=>w.consolidadoEn===oid).forEach(w=>ops.push(b=>b.update(colWorkers(z).doc(w.id),{consolidadoEn:kid,consolidadoZona:kz}))));
+    const updK={nombre:(nom+' '+ape).trim(),nombres:nom,apellidos:ape,activo:true};
+    ops.push(b=>b.update(colWorkers(kz).doc(kid),updK));
+    ops.push(b=>b.update(colWorkers(oz).doc(oid),{activo:false,consolidadoEn:kid,consolidadoZona:kz}));
+    await commitOps(ops,'Uniendo…');
+    await loadPredioData(activePred);
+    renderConfig();
+    toast(`✅ Unidos en ${ape}, ${nom} (${nR} registros, ${nRe} reemplazos, ${nF} fotos)`);
   }catch(e){loading(false);toast('Error: '+e.message)}
 }
 
