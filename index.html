@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-29-1';
+const APP_V = '2026-09-29-2';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -407,6 +407,15 @@ select:focus,input:focus{border-color:var(--green)}
             </div>
           </div>
           <div><label>Reemplazante (opcional)</label><select id="selReemplazo"><option value="">— Sin reemplazante —</option></select></div>
+        </div>
+      </div>
+      <!-- Persona de apoyo: alguien del campo que ayudó al encargado a terminar su labor del día -->
+      <div id="apoyoSection" style="display:none;background:var(--cream);border:1.5px solid var(--sand);border-radius:11px;padding:10px 12px;margin-bottom:9px">
+        <label for="chkApoyo" style="display:flex;align-items:center;gap:7px;margin:0;font-size:12px;text-transform:none;letter-spacing:0;font-weight:600;color:var(--dark);cursor:pointer"><input type="checkbox" id="chkApoyo" onchange="onChkApoyo()" style="width:16px;height:16px;accent-color:var(--green);cursor:pointer">🤝 Tuvo persona de apoyo</label>
+        <div id="apoyoDiv" style="display:none;margin-top:8px">
+          <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:7px">Las labores y mesas de esta entrada quedan a nombre del encargado. El apoyo registra su propio día aparte.</div>
+          <div id="apoyoRows"></div>
+          <button type="button" class="btn btn-secondary" style="margin-top:4px;padding:7px;font-size:11px" onclick="addApoyoRow()">＋ Otra persona de apoyo</button>
         </div>
       </div>
       <div style="margin-bottom:4px">
@@ -1320,6 +1329,78 @@ function jornadaTxt(r){
   return 'Día completo';
 }
 
+// ── PERSONA DE APOYO (2026-09-29-2) ──
+// Guarda en el registro: apoyos:[{workerId,predioId,horas}] · "otro" = externo
+const MAX_APOYO=3;
+function apoyoOptsHTML(excluir,val){
+  const opts=PRED_ORDER.map(z=>{
+    const l=sortWs(wActivos(wMap[z]||[])).filter(w=>w.id!==excluir);
+    return l.length?`<optgroup label="${PREDIOS[z].nombre}">${l.map(w=>`<option value="${z}|${w.id}"${val===z+'|'+w.id?' selected':''}>${wDisplay(w)}${w.subjefe?' · '+w.subjefe:''}</option>`).join('')}</optgroup>`:'';
+  }).join('');
+  return `<option value="">— Seleccionar persona de apoyo —</option>`+opts+`<option value="otro|otro"${val==='otro|otro'?' selected':''}>Otro (externo)</option>`;
+}
+function addApoyoRow(){
+  const cont=document.getElementById('apoyoRows');if(!cont)return;
+  if(cont.querySelectorAll('.apoyo-row').length>=MAX_APOYO){toast('Máximo '+MAX_APOYO+' personas de apoyo');return}
+  const row=document.createElement('div');row.className='apoyo-row';
+  row.style.cssText='display:flex;gap:6px;align-items:flex-end;margin-bottom:6px';
+  row.innerHTML=`<div style="flex:1;min-width:0"><label style="font-size:10px">Persona de apoyo</label><select class="ap-w">${apoyoOptsHTML(document.getElementById('selW').value,'')}</select></div>
+    <div style="flex:0 0 74px"><label style="font-size:10px">Horas</label><input type="number" class="ap-h" min="0.5" max="12" step="0.5" placeholder="h" style="text-align:center"></div>
+    <button type="button" class="rm-labor" style="margin-bottom:9px" onclick="rmApoyoRow(this)">✕</button>`;
+  cont.appendChild(row);
+}
+function rmApoyoRow(btn){
+  const row=btn.closest('.apoyo-row');if(row)row.remove();
+  if(!document.querySelectorAll('#apoyoRows .apoyo-row').length){document.getElementById('chkApoyo').checked=false;onChkApoyo();}
+}
+function onChkApoyo(){
+  const on=document.getElementById('chkApoyo').checked;
+  document.getElementById('apoyoDiv').style.display=on?'block':'none';
+  const cont=document.getElementById('apoyoRows');
+  if(on&&!cont.querySelectorAll('.apoyo-row').length)addApoyoRow();
+  if(!on)cont.innerHTML='';
+}
+function resetApoyoUI(){
+  const c=document.getElementById('chkApoyo');if(c)c.checked=false;
+  const r=document.getElementById('apoyoRows');if(r)r.innerHTML='';
+  const d=document.getElementById('apoyoDiv');if(d)d.style.display='none';
+}
+// Visible con trabajador elegido y no ausente (si está ausente se usa "Reemplazante")
+function updApoyoVis(){
+  const wId=document.getElementById('selW').value;
+  const aus=document.getElementById('chkAusente').checked;
+  const sec=document.getElementById('apoyoSection');if(!sec)return;
+  const vis=!!wId&&!aus;
+  sec.style.display=vis?'block':'none';
+  if(!vis)resetApoyoUI();
+  else document.querySelectorAll('#apoyoRows .ap-w').forEach(sel=>{const v=sel.value;sel.innerHTML=apoyoOptsHTML(wId,v);if(sel.value!==v)sel.value='';});
+}
+function leerApoyos(){
+  if(!document.getElementById('chkApoyo').checked)return {apoyos:null};
+  const wId=document.getElementById('selW').value;
+  const out=[],vistos=new Set();
+  for(const row of document.querySelectorAll('#apoyoRows .apoyo-row')){
+    const sel=row.querySelector('.ap-w'),hIn=row.querySelector('.ap-h');
+    const v=sel.value,h=parseFloat(hIn.value)||0;
+    sel.style.borderColor=v?'':'var(--red)';hIn.style.borderColor=h>0?'':'var(--red)';
+    if(!v)return {err:'Selecciona la persona de apoyo'};
+    if(!(h>0))return {err:'Indica las horas de apoyo'};
+    if(h>12)return {err:'Las horas de apoyo no pueden superar 12'};
+    const [predioId,workerId]=v.split('|');
+    if(workerId===wId)return {err:'La persona de apoyo no puede ser el mismo encargado'};
+    if(workerId!=='otro'&&vistos.has(workerId))return {err:'Hay una persona de apoyo repetida'};
+    vistos.add(workerId);
+    out.push({workerId,predioId:predioId==='otro'?null:predioId,horas:h});
+  }
+  if(!out.length)return {apoyos:null};
+  return {apoyos:out};
+}
+function apoyoNombre(a){
+  if(!a||a.workerId==='otro')return 'Otro (externo)';
+  const w=(wMap[a.predioId]||[]).find(x=>x.id===a.workerId)||(typeof wById==='function'?wById(a.workerId):null);
+  return w?wDisplay(w):'(no encontrado)';
+}
+
 function onChkPrestado(){
   const on=document.getElementById('chkPrestado').checked;
   document.getElementById('prestadoInfo').style.display=on?'block':'none';
@@ -1338,6 +1419,7 @@ function checkAusente(){
   }
   filtW();
   updateCicloSel();
+  updApoyoVis();
 }
 
 function resetAusenciaUI(){
@@ -1368,6 +1450,7 @@ function onChkAusente(){
   document.getElementById('tipoAusenciaDiv').style.display=c?'block':'none';
   if(c){onTipoAusencia();}
   else{resetAusenciaUI();}
+  updApoyoVis();
 }
 
 function toggleReemplazo(){
@@ -1609,6 +1692,7 @@ function eHTML(e,pred=activePred){
       ${canDel?`<button class="del-btn" onclick="delEntry('${e.id}')">✕</button>`:''}
     </div>
     ${reemplazoHTML}
+    ${(e.apoyos&&e.apoyos.length)?`<div style="background:#ECFDF5;border-radius:7px;padding:5px 9px;margin-top:5px;font-size:11px;color:#047857;line-height:1.45">🤝 Apoyo: ${e.apoyos.map(a=>`<strong>${apoyoNombre(a)}</strong>${a.predioId&&a.predioId!==pred&&PREDIOS[a.predioId]?` (${PREDIOS[a.predioId].nombre})`:''} · ${a.horas} h`).join(' · ')}</div>`:''}
     <div class="badges" style="margin:7px 0">
       <span class="badge b${pc}">${PREDIOS[pred].nombre}</span>
       ${e.cicloTemporada
@@ -1692,6 +1776,9 @@ async function guardar(){
   const skipLabores=ausente&&!reemplazoVal;
   if(!skipLabores&&hasError){toast('⚠️ '+errorMsg);return}
   if(!skipLabores&&!labores.length){toast('⚠️ Agrega al menos una labor');return}
+  const ap=ausente?{apoyos:null}:leerApoyos();
+  if(ap.err){toast('⚠️ '+ap.err);return}
+  const apoyos=ap.apoyos;
   let reemplazoPredioId=null,reemplazoWorkerId=null;
   if(ausente&&reemplazoVal){[reemplazoPredioId,reemplazoWorkerId]=reemplazoVal.split('|')}
   // Época/ciclo de la labor: con 2+ ciclos vigentes se exige elegir (salvo ausencias);
@@ -1714,6 +1801,7 @@ async function guardar(){
     let fotosSell=[];
     if(nFotos){
       const sello=selloFoto(wSel,labores,obs,ausente,tipo);
+      if(apoyos)sello.splice(2,0,'Apoyo: '+apoyos.map(a=>apoyoNombre(a)+' '+a.horas+'h').join(', '));
       if(prestadoDe)sello.splice(2,0,`Prestado de ${PREDIOS[prestadoDe].nombre}${subjefeOrigen?' ('+subjefeOrigen+')':''}`);
       for(const f of fotosPend){
         const img=await cargarImg(f.data);
@@ -1725,6 +1813,7 @@ async function guardar(){
       cicloId,cicloTemporada,cicloSector,
       ausente:ausente||false,tipoAusencia:tipo,licencia:licencia||false,vacaciones:vacaciones||false,
       ausAM,ausPM,ausInicio,ausFin,reemplazoPredioId,reemplazoWorkerId,
+      apoyos,
       lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid});
     let fotosOk=0,fotoErr='';
     for(let i=0;i<fotosSell.length;i++){
@@ -1743,6 +1832,7 @@ async function guardar(){
     resetAusenciaUI();
     document.getElementById('tipoAusenciaDiv').style.display='none';
     document.getElementById('ausenteSection').style.display='none';
+    resetApoyoUI();
     initLaborRows();
     if(fotosOk<nFotos){toast(`⚠️ Entrada guardada, pero ${nFotos-fotosOk} foto(s) no se subieron: ${fotoErr}`);}
     else toast(nFotos?`✅ Entrada guardada con ${nFotos} foto${nFotos>1?'s':''}`:'✅ Entrada guardada');
@@ -3026,6 +3116,17 @@ function buildSheetAusencias(regs,ws){
   return rows;
 }
 
+function buildSheetApoyos(regs,ws){
+  const rows=[['Fecha','Encargado apoyado','Subjefe','Persona de apoyo','Zona del apoyo','Horas de apoyo','Labores de la entrada']];
+  regs.filter(r=>!r.ausente&&r.apoyos&&r.apoyos.length).forEach(r=>{
+    const w=ws.find(x=>x.id===r.workerId);if(!w)return;
+    const labs=(r.labores||[]).map(l=>{const li=laborInfo(l.laborId,recLV(r));return l.laborId+(li?' '+li.d:'')+(l.mesas?' ('+l.mesas+' mesas)':'')}).join(' / ');
+    r.apoyos.forEach(a=>rows.push([r.fecha,wDisplay(w),w.subjefe,apoyoNombre(a),a.predioId&&PREDIOS[a.predioId]?PREDIOS[a.predioId].nombre:'Externo',a.horas||0,labs]));
+  });
+  rows.splice(1,rows.length-1,...rows.slice(1).sort((a,b)=>a[0]===b[0]?a[1].localeCompare(b[1]):a[0].localeCompare(b[0])));
+  return rows;
+}
+
 // ── Costos ──
 function costoDeHoras(h){const hj=cfgGlobal.horasJornada||8;return h/hj*(cfgGlobal.costoJornada||0)}
 const fmtCLP=n=>'$'+Math.round(n).toLocaleString('es-CL');
@@ -3205,6 +3306,7 @@ async function generarInformeCompleto(){
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCumplimientoFiltered(regs,ws,progs,f)),'Prog vs Real');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCosecha(regs,ws)),'Cosecha');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetAusencias(regs,ws)),'Ausencias');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetApoyos(regs,ws)),'Apoyos');
     const {porTrab,porLabor}=collectEvals(regs,ws);
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetRankingTrab(porTrab)),'Ranking trabajadores');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetRankingLabor(porLabor)),'Ranking labores');
