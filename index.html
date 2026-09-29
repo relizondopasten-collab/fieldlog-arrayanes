@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-29-3';
+const APP_V = '2026-09-29-4';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -507,6 +507,7 @@ select:focus,input:focus{border-color:var(--green)}
         <button class="btn btn-secondary" onclick="generarInforme('encargados')" style="font-size:11px;padding:8px">👨‍🌾 Por encargado ($)</button>
         <button class="btn btn-secondary" onclick="generarInforme('ranking')" style="font-size:11px;padding:8px">🏆 Ranking capacidades</button>
         <button class="btn btn-secondary" onclick="generarInforme('ausencias')" style="font-size:11px;padding:8px;grid-column:span 2">🏥 Ausencias, licencias y vacaciones</button>
+        <button class="btn btn-secondary" onclick="generarInforme('zonas')" style="font-size:11px;padding:8px;grid-column:span 2">🗺 Zonas: ha vs personal y costo % por labor</button>
       </div>
       <button class="btn btn-primary" onclick="renderInfCharts()" style="margin-top:10px;background:var(--dark)">📊 Ver gráficos del periodo</button>
       <button class="btn btn-primary" onclick="generarDashboard()" style="margin-top:6px">📈 Descargar dashboard (HTML)</button>
@@ -605,6 +606,17 @@ select:focus,input:focus{border-color:var(--green)}
         <div><label>Horas por jornada</label><input type="number" id="cfgHorasJornada" placeholder="8" min="1" step="0.5"></div>
       </div>
       <button class="btn btn-primary" onclick="saveCfgCosto()">Guardar parámetros</button>
+      <div class="sec-div">Superficie por zona (ha)</div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Se usa en los informes para comparar personal, jornadas y costo por hectárea entre zonas. En Zona 3 se separa por época (primor / verano) según el ciclo del registro.</p>
+      <div class="form-grid">
+        <div><label>Zona 1 (ha)</label><input type="number" id="supZ1" min="0" step="0.1"></div>
+        <div><label>Zona 2 (ha)</label><input type="number" id="supZ2" min="0" step="0.1"></div>
+      </div>
+      <div class="form-grid">
+        <div><label>Zona 3 · Primor (ha)</label><input type="number" id="supZ3P" min="0" step="0.1"></div>
+        <div><label>Zona 3 · Verano (ha)</label><input type="number" id="supZ3V" min="0" step="0.1"></div>
+      </div>
+      <button class="btn btn-secondary" onclick="saveCfgSuperficies()">Guardar superficies</button>
     </div>
     <div class="card">
       <div class="card-title">⚠️ Datos</div>
@@ -1071,7 +1083,32 @@ async function loadCfgGlobal(){
     const ci=document.getElementById('cfgCostoJornada'),hi=document.getElementById('cfgHorasJornada');
     if(ci&&!ci.value&&cfgGlobal.costoJornada)ci.value=cfgGlobal.costoJornada;
     if(hi&&!hi.value)hi.value=cfgGlobal.horasJornada;
+    fillSupInputs();
   }catch(e){console.error('cfg',e)}
+}
+// ── Superficie por zona (ha). Defaults entregados por Rafael 2026-09-29; editables en Config ──
+// Estructura: {zona:{total:ha}} o, si la zona se divide por época, {zona:{primor:ha,verano:ha}}
+const SUP_DEF={z1:{total:8.5},z2:{total:7},z3:{primor:1.3,verano:7.6}};
+function supZona(z){const c=cfgGlobal.superficies&&cfgGlobal.superficies[z];return (c&&Object.keys(c).length)?c:(SUP_DEF[z]||{})}
+function haZona(z){return Object.values(supZona(z)).reduce((a,b)=>a+(+b||0),0)}
+function fillSupInputs(){
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=(v==null?'':v)};
+  set('supZ1',haZona('z1'));set('supZ2',haZona('z2'));
+  set('supZ3P',supZona('z3').primor);set('supZ3V',supZona('z3').verano);
+}
+async function saveCfgSuperficies(){
+  if(!isAdmin()){toast('Solo admin puede cambiar los parámetros');return}
+  const v=id=>parseFloat(String(document.getElementById(id).value).replace(',','.'));
+  const z1=v('supZ1'),z2=v('supZ2'),p=v('supZ3P'),ve=v('supZ3V');
+  if([z1,z2,p,ve].some(x=>isNaN(x)||x<0)){toast('⚠️ Ingresa superficies válidas (0 o más)');return}
+  const sup={z1:{total:z1},z2:{total:z2},z3:{primor:p,verano:ve}};
+  loading(true,'Guardando…');
+  try{
+    await db.collection('arr_config').doc('global').set({superficies:sup},{merge:true});
+    cfgGlobal={...cfgGlobal,superficies:sup};
+    toast('✅ Superficies guardadas');
+  }catch(e){toast('Error: '+e.message)}
+  loading(false);
 }
 
 async function saveCfgCosto(){
@@ -3110,18 +3147,18 @@ function buildSheetLabores(regs,ws){
       map[nid].trabajadores.add(r.workerId);map[nid].dias.add(r.fecha);
     });
   });
-  const rows=[['Código','Labor','Horas totales','Mesas totales','Cajas','N° trabajadores','Días con esta labor']];
+  // Costo y % del costo: el costo es proporcional a las horas (horas ÷ horas jornada × costo jornada),
+  // así que el % se calcula sobre las horas y es válido aunque no esté configurado el costo jornada.
+  const hj=cfgGlobal.horasJornada||8;
+  const totH=Object.values(map).reduce((s,m)=>s+m.horas,0);
+  const rows=[['Código','Labor','Horas totales','Jornadas equiv.','Costo (CLP)','% del costo total','Mesas totales','Cajas','N° trabajadores','Días con esta labor']];
   const keys=Object.keys(map);
   const nums=keys.filter(k=>!String(k).startsWith('v1_')).map(Number).sort((a,b)=>a-b);
   const legacy=keys.filter(k=>String(k).startsWith('v1_')).sort();
-  nums.forEach(id=>{
-    const m=map[id];const lab=LABORES.find(x=>x.id===id);
-    rows.push([id,lab?lab.d:'(desconocida)',Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.trabajadores.size,m.dias.size]);
-  });
-  legacy.forEach(k=>{
-    const m=map[k];const oldId=Number(String(k).slice(3));const lab=LABORES_V1.find(x=>x.id===oldId);
-    rows.push(['ant. '+oldId,(lab?lab.d:'(desconocida)')+' (lista antigua)',Number(m.horas.toFixed(2)),m.mesas,m.cajas,m.trabajadores.size,m.dias.size]);
-  });
+  const push=(code,desc,m)=>rows.push([code,desc,Number(m.horas.toFixed(2)),Number((m.horas/hj).toFixed(2)),Math.round(costoDeHoras(m.horas)),pctTxt(m.horas,totH),m.mesas,m.cajas,m.trabajadores.size,m.dias.size]);
+  nums.forEach(id=>{const lab=LABORES.find(x=>x.id===id);push(id,lab?lab.d:'(desconocida)',map[id])});
+  legacy.forEach(k=>{const oldId=Number(String(k).slice(3));const lab=LABORES_V1.find(x=>x.id===oldId);push('ant. '+oldId,(lab?lab.d:'(desconocida)')+' (lista antigua)',map[k])});
+  if(rows.length>1)rows.push(['TOTAL','',Number(totH.toFixed(2)),Number((totH/hj).toFixed(2)),Math.round(costoDeHoras(totH)),totH>0?100:0,'','','','']);
   return rows;
 }
 
@@ -3198,6 +3235,97 @@ function buildSheetApoyos(regs,ws){
 // ── Costos ──
 function costoDeHoras(h){const hj=cfgGlobal.horasJornada||8;return h/hj*(cfgGlobal.costoJornada||0)}
 const fmtCLP=n=>'$'+Math.round(n).toLocaleString('es-CL');
+// % con 1 decimal (número, para Excel)
+const pctTxt=(v,tot)=>tot>0?Number((v/tot*100).toFixed(1)):0;
+const r2=n=>Number((+n||0).toFixed(2));
+function laborKeyInfo(nid){
+  if(typeof nid==='number'){const lab=LABORES.find(x=>x.id===nid);return{code:nid,desc:lab?lab.d:'(desconocida)'}}
+  const oldId=Number(String(nid).slice(3));const lab=LABORES_V1.find(x=>x.id===oldId);
+  return{code:'ant. '+oldId,desc:(lab?lab.d:'(desconocida)')+' (lista antigua)'};
+}
+// Horas por labor (id normalizado) de una lista de registros
+function horasPorLabor(regs){
+  const m={};
+  regs.forEach(r=>{if(r.ausente)return;const lv=recLV(r);(r.labores||[]).forEach(l=>{const k=normLaborId(l.laborId,lv);m[k]=(m[k]||0)+(l.horas||0)})});
+  return m;
+}
+
+// ── Comparación entre zonas: superficie (ha) vs personal, jornadas y costo ──
+// Lee los registros de LAS 3 ZONAS en el rango (no depende de la zona activa ni del filtro de subjefe).
+async function fetchRegsZonas(f){
+  const snaps=await Promise.all(PRED_ORDER.map(z=>colRegistros(z).where('fecha','>=',f.desde).where('fecha','<=',f.hasta).get()));
+  const out={};PRED_ORDER.forEach((z,i)=>out[z]=snaps[i].docs.map(d=>({id:d.id,...d.data()})));
+  return out;
+}
+function encargadosZona(z){return wTodos().filter(w=>esActivo(w)&&!w.consolidadoEn&&subIn(w.subjefe,PREDIOS[z].subjefes))}
+// Devuelve por zona: ha, encargados, plantas, personas con registro, horas; y el desglose por época si la zona lo tiene
+function statsZonas(rz){
+  return PRED_ORDER.map(z=>{
+    const regs=rz[z]||[];
+    const enc=encargadosZona(z);
+    const plantas=enc.reduce((s,w)=>s+(+w.plantas||0),0);
+    const pers=new Set();let horas=0;const hEp={};
+    regs.forEach(r=>{
+      if(r.ausente)return;
+      const h=(r.labores||[]).reduce((s,l)=>s+(l.horas||0),0);
+      if(h>0)pers.add(r.workerId);
+      horas+=h;
+      const ep=r.cicloTemporada||'_sin';hEp[ep]=(hEp[ep]||0)+h;
+    });
+    const sup=supZona(z);
+    const porEpoca=Object.keys(sup).some(k=>k!=='total');
+    let epocas=[];
+    if(porEpoca){
+      epocas=Object.keys(sup).map(ep=>({ep,nombre:TNAMES[ep]||ep,ha:+sup[ep]||0,horas:hEp[ep]||0}));
+      const otras=Object.keys(hEp).filter(ep=>!(ep in sup)).reduce((s,ep)=>s+hEp[ep],0);
+      if(otras>0)epocas.push({ep:'_otras',nombre:'Sin época / otra',ha:null,horas:otras});
+    }
+    return{z,nombre:PREDIOS[z].nombre,ha:haZona(z),enc:enc.length,plantas,personas:pers.size,horas,epocas};
+  });
+}
+function buildSheetZonas(st){
+  const hj=cfgGlobal.horasJornada||8;
+  const totH=st.reduce((s,x)=>s+x.horas,0);
+  const div=(a,b)=>b>0?r2(a/b):'';
+  const rows=[['Zona','Época','Superficie (ha)','Encargados activos','ha por encargado','Encargados por ha','Plantas','Plantas por ha','Personas con registro','Horas','Jornadas','Jornadas por ha','Costo (CLP)','Costo por ha (CLP)','% del costo total']];
+  st.forEach(x=>{
+    x.epocas.forEach(e=>{
+      const j=e.horas/hj;
+      rows.push([x.nombre,e.nombre,e.ha==null?'':e.ha,'','','','','','',r2(e.horas),r2(j),e.ha?div(j,e.ha):'',Math.round(costoDeHoras(e.horas)),e.ha?Math.round(costoDeHoras(e.horas)/e.ha):'',pctTxt(e.horas,totH)]);
+    });
+    const j=x.horas/hj;
+    rows.push([x.nombre+(x.epocas.length?' — TOTAL':''),x.epocas.length?'Todas':'',r2(x.ha),x.enc,div(x.ha,x.enc),div(x.enc,x.ha),x.plantas,x.ha>0?Math.round(x.plantas/x.ha):'',x.personas,r2(x.horas),r2(j),div(j,x.ha),Math.round(costoDeHoras(x.horas)),x.ha>0?Math.round(costoDeHoras(x.horas)/x.ha):'',pctTxt(x.horas,totH)]);
+  });
+  const ha=st.reduce((s,x)=>s+x.ha,0),enc=st.reduce((s,x)=>s+x.enc,0),pl=st.reduce((s,x)=>s+x.plantas,0),pe=st.reduce((s,x)=>s+x.personas,0),j=totH/hj;
+  rows.push(['TOTAL CAMPO','',r2(ha),enc,div(ha,enc),div(enc,ha),pl,ha>0?Math.round(pl/ha):'',pe,r2(totH),r2(j),div(j,ha),Math.round(costoDeHoras(totH)),ha>0?Math.round(costoDeHoras(totH)/ha):'',totH>0?100:0]);
+  rows.push([]);
+  rows.push(['Notas:']);
+  rows.push(['Encargados activos = dotación actual de cada subjefe (no depende del periodo). Personas con registro = quienes registraron horas en la zona en el periodo (incluye prestados).']);
+  rows.push(['Horas, jornadas y costo = labores registradas en cada zona en el periodo, las 3 zonas, sin filtro de subjefe. Zona 3 se separa por la época del ciclo del registro. No incluye horas de persona de apoyo.']);
+  rows.push(['Costo = horas ÷ '+hj+' h × costo jornada ('+(cfgGlobal.costoJornada?fmtCLP(cfgGlobal.costoJornada):'NO CONFIGURADO: costos en $0')+'). El % del costo se calcula sobre horas.']);
+  return rows;
+}
+// Costo y % por labor en cada zona (el % es dentro de cada zona)
+function buildSheetLaborZonas(rz){
+  const hz={};PRED_ORDER.forEach(z=>hz[z]=horasPorLabor(rz[z]||[]));
+  const tz={};PRED_ORDER.forEach(z=>tz[z]=Object.values(hz[z]).reduce((a,b)=>a+b,0));
+  const tot=PRED_ORDER.reduce((s,z)=>s+tz[z],0);
+  const keys=new Set();PRED_ORDER.forEach(z=>Object.keys(hz[z]).forEach(k=>keys.add(k)));
+  const allK=[...keys].map(k=>String(k).startsWith('v1_')?k:Number(k));
+  const hTot=k=>PRED_ORDER.reduce((s,z)=>s+(hz[z][k]||0),0);
+  allK.sort((a,b)=>hTot(b)-hTot(a));
+  const head=['Código','Labor'];PRED_ORDER.forEach(z=>head.push(PREDIOS[z].nombre+' · Costo (CLP)',PREDIOS[z].nombre+' · %'));head.push('Campo · Costo (CLP)','Campo · %');
+  const rows=[head];
+  allK.forEach(k=>{
+    const li=laborKeyInfo(k);const row=[li.code,li.desc];
+    PRED_ORDER.forEach(z=>{const h=hz[z][k]||0;row.push(Math.round(costoDeHoras(h)),pctTxt(h,tz[z]))});
+    row.push(Math.round(costoDeHoras(hTot(k))),pctTxt(hTot(k),tot));
+    rows.push(row);
+  });
+  const tr=['TOTAL',''];PRED_ORDER.forEach(z=>tr.push(Math.round(costoDeHoras(tz[z])),tz[z]>0?100:0));tr.push(Math.round(costoDeHoras(tot)),tot>0?100:0);
+  if(rows.length>1)rows.push(tr);
+  return rows;
+}
 
 // Informe: labores por encargado (subjefe) con horas, jornadas y costo
 function buildSheetEncargados(regs,ws){
@@ -3305,7 +3433,7 @@ async function generarInforme(tipo){
     let datos;
     let nota='';
     if(tipo==='trabajadores'){datos=buildSheetTrabajadores(regs,ws);nombre='Por trabajador';}
-    else if(tipo==='labores'){datos=buildSheetLabores(regs,ws);nombre='Por labor';}
+    else if(tipo==='labores'){datos=buildSheetLabores(regs,ws);nombre='Por labor';if(!cfgGlobal.costoJornada)nota='ℹ️ Costo jornada no configurado: costos en $0 (los % sí son válidos).';}
     else if(tipo==='cumplimiento'){
       const progs=await fetchProgramaciones(f);
       datos=buildSheetCumplimientoFiltered(regs,ws,progs,f);nombre='Programado vs Real';
@@ -3315,6 +3443,17 @@ async function generarInforme(tipo){
     else if(tipo==='encargados'){
       datos=buildSheetEncargados(regs,ws);nombre='Por encargado';
       if(!cfgGlobal.costoJornada)nota='ℹ️ Costo jornada no configurado (Config → Costo jornada hombre): los costos salen en $0.';
+    }
+    else if(tipo==='zonas'){
+      msg.textContent='⏳ Leyendo registros de las 3 zonas…';
+      const rz=await fetchRegsZonas(f);
+      const dZ=buildSheetZonas(statsZonas(rz)),dL=buildSheetLaborZonas(rz);
+      XLSX.utils.book_append_sheet(wb,aoaToSheet(dZ),'Zonas ha y personal');
+      XLSX.utils.book_append_sheet(wb,aoaToSheet(dL),'Costo % labor por zona');
+      const fn=`Arrayanes_Zonas_ha_personal_${f.desde}_a_${f.hasta}.xlsx`;
+      descargarXLSX(wb,fn);
+      msg.textContent='✅ Descargado: '+fn+(cfgGlobal.costoJornada?'':' · ℹ️ Costo jornada no configurado: costos en $0 (los % sí son válidos).');
+      return;
     }
     else if(tipo==='ranking'){
       const {porTrab,porLabor}=collectEvals(regs,ws);
@@ -3343,6 +3482,7 @@ async function generarInformeCompleto(){
     const regs=filtrarRegistros(f);
     const ws=wsZonaConPrestados();
     const progs=await fetchProgramaciones(f);
+    const rz=await fetchRegsZonas(f);
     const wb=XLSX.utils.book_new();
     // Hoja resumen
     const pName=pD().nombre||activePred;
@@ -3357,15 +3497,19 @@ async function generarInformeCompleto(){
       [],
       ['Hojas incluidas:'],
       ['1. Por trabajador'],
-      ['2. Por labor'],
+      ['2. Por labor (con costo y % del costo)'],
       ['3. Por encargado (horas, jornadas y costo)'],
       ['4. Programado vs Real'],
       ['5. Cosecha'],
       ['6. Ausencias, licencias y vacaciones'],
-      ['7. Ranking capacidades (trabajadores y labores)'],
+      ['7. Apoyos'],
+      ['8. Ranking capacidades (trabajadores y labores)'],
+      ['9. Zonas: superficie (ha) vs personal, jornadas y costo — 3 zonas'],
+      ['10. Costo % por labor en cada zona — 3 zonas'],
       [],
       ['Costo jornada hombre (CLP)',cfgGlobal.costoJornada||'(no configurado)'],
-      ['Horas por jornada',cfgGlobal.horasJornada||8]
+      ['Horas por jornada',cfgGlobal.horasJornada||8],
+      ['Superficie (ha)',PRED_ORDER.map(z=>{const s=supZona(z);const ks=Object.keys(s);return PREDIOS[z].nombre+': '+(ks.length===1&&ks[0]==='total'?s.total:ks.map(k=>(TNAMES[k]||k)+' '+s[k]).join(' + '))}).join(' · ')]
     ];
     XLSX.utils.book_append_sheet(wb,aoaToSheet(resumen),'Resumen');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetTrabajadores(regs,ws)),'Por trabajador');
@@ -3378,6 +3522,8 @@ async function generarInformeCompleto(){
     const {porTrab,porLabor}=collectEvals(regs,ws);
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetRankingTrab(porTrab)),'Ranking trabajadores');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetRankingLabor(porLabor)),'Ranking labores');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetZonas(statsZonas(rz))),'Zonas ha y personal');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetLaborZonas(rz)),'Costo % labor por zona');
     const filename=`Arrayanes_Informe_${f.desde}_a_${f.hasta}.xlsx`;
     descargarXLSX(wb,filename);
     msg.textContent='✅ Descargado: '+filename;
@@ -3435,6 +3581,11 @@ async function generarDashboard(){
     })});
     const labsTop=Object.entries(byLab).sort((a,b)=>b[1]-a[1]).slice(0,12);
     const maxLabH=Math.max(1,...labsTop.map(x=>x[1]));
+    const totLabH=Object.values(byLab).reduce((a,b)=>a+b,0);
+    const labsPct=Object.entries(byLab).sort((a,b)=>b[1]-a[1]);
+    // Zonas: ha vs personal (3 zonas)
+    const stZ=statsZonas(await fetchRegsZonas(f));
+    const tZonas=buildSheetZonas(stZ).filter(r=>r.length>1);
     // Capacidades (evaluaciones)
     const {porTrab,porLabor}=collectEvals(regs,ws);
     const trab=Object.values(porTrab).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
@@ -3479,7 +3630,9 @@ ${kpi(regs.length,'Registros')}${kpi(trabAct.size,'Trabajadores')}${kpi(horas.to
 </div>
 ${cfgGlobal.costoJornada?'':'<p class="note">ℹ️ Costo jornada no configurado en la app: los costos se muestran en $0.</p>'}
 <div class="card"><h2>⏱ Horas y costo por encargado</h2>${subs.length?subs.map(([s,h])=>dbBar('👤 '+s,h.toFixed(1)+' h · '+fmtCLP(costoDeHoras(h)),h/maxSubH*100,'#40916C')).join(''):'<p class="note">Sin datos</p>'}</div>
-<div class="card"><h2>🌱 Labores con más horas</h2>${labsTop.length?labsTop.map(([k,h])=>dbBar(k,h.toFixed(1)+' h',h/maxLabH*100,'#74C69D')).join(''):'<p class="note">Sin datos</p>'}</div>
+<div class="card"><h2>🌱 Labores con más horas</h2>${labsTop.length?labsTop.map(([k,h])=>dbBar(k,h.toFixed(1)+' h · '+pctTxt(h,totLabH)+'%',h/maxLabH*100,'#74C69D')).join(''):'<p class="note">Sin datos</p>'}</div>
+<div class="card"><h2>💰 % del costo por labor</h2><p class="note" style="margin:0 0 8px">Total ${fmtCLP(costoDeHoras(totLabH))} · ${totLabH.toFixed(1)} h. El costo es proporcional a las horas.</p>${labsPct.length?labsPct.map(([k,h])=>dbBar(k,pctTxt(h,totLabH)+'% · '+fmtCLP(costoDeHoras(h)),pctTxt(h,totLabH),'#2D6A4F')).join(''):'<p class="note">Sin datos</p>'}</div>
+<div class="card"><h2>🗺 Zonas: superficie vs personal y costo</h2><p class="note" style="margin:0 0 8px">Las 3 zonas en el periodo, sin filtro de subjefe.</p>${stZ.map(x=>dbBar(x.nombre+' · '+x.ha+' ha',x.enc+' enc. · '+(x.ha>0?(x.enc/x.ha).toFixed(2):'—')+' enc./ha · '+(x.ha>0?fmtCLP(costoDeHoras(x.horas)/x.ha):'—')+'/ha',x.ha>0?(x.enc/x.ha)/Math.max(...stZ.map(y=>y.ha>0?y.enc/y.ha:0),0.0001)*100:0,'#40916C')).join('')}${tabla(tZonas)}</div>
 <div class="card"><h2>🏆 Capacidad por trabajador</h2><p class="note" style="margin:0 0 8px">Según evaluaciones 1 (muy bien) · 2 (bien) · 3 (mal). 100% = todas «muy bien».</p>${trab.length?trab.map(m=>dbBar(m.nombre,m.pct+'% · '+m.n+' eval. · prom. '+m.avg.toFixed(2),m.pct,capColorHex(m.pct))).join(''):'<p class="note">Sin labores evaluadas en el periodo</p>'}</div>
 <div class="card"><h2>🎯 Capacidad por labor</h2>${labsCap.length?labsCap.map(m=>dbBar(m.code+'. '+m.desc,m.pct+'% · '+m.n+' eval.',m.pct,capColorHex(m.pct))).join(''):'<p class="note">Sin labores evaluadas en el periodo</p>'}</div>
 <div class="card"><h2>🏥 Ausencias por motivo</h2>${Object.keys(ausCnt).length?Object.entries(ausCnt).sort((a,b)=>b[1]-a[1]).map(([t,n])=>dbBar(AUS_TXT[t]||t,n+' registro'+(n>1?'s':''),n/maxAus*100,'#B45309')).join(''):'<p class="note">Sin ausencias en el periodo</p>'}</div>
@@ -3497,7 +3650,7 @@ ${cfgGlobal.costoJornada?'':'<p class="note">ℹ️ Costo jornada no configurado
   }catch(e){msg.textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
 }
 
-function renderInfCharts(){
+async function renderInfCharts(){
   const f=getInfFiltros();if(!f)return;
   const regs=filtrarRegistros(f);
   const ws=wsZonaConPrestados();
@@ -3513,7 +3666,30 @@ function renderInfCharts(){
   const trab=Object.values(porTrab).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
   const labs=Object.values(porLabor).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
   const costoNota=cfgGlobal.costoJornada?'':`<p style="font-size:11px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:6px 10px;margin-bottom:8px">ℹ️ Configura el costo de la jornada (Config → Costo jornada hombre) para ver costos reales.</p>`;
+  // % del costo por labor (zona activa, con filtro de subjefe)
+  const hl=horasPorLabor(regs);const totLH=Object.values(hl).reduce((a,b)=>a+b,0);
+  const labPct=Object.entries(hl).map(([k,h])=>{const li=laborKeyInfo(String(k).startsWith('v1_')?k:Number(k));return{li,h}}).sort((a,b)=>b.h-a.h);
+  const maxLP=Math.max(0.0001,...labPct.map(x=>x.h));
+  // Zonas (3 zonas, sin filtro de subjefe)
+  let zonasHTML='';
+  try{
+    const stZ=statsZonas(await fetchRegsZonas(f));
+    const hj=cfgGlobal.horasJornada||8;
+    const maxEH=Math.max(0.0001,...stZ.map(x=>x.ha>0?x.enc/x.ha:0));
+    zonasHTML=`<div class="card">
+      <div class="card-title">🗺 Zonas: superficie vs personal</div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Las 3 zonas en el periodo, sin filtro de subjefe. Encargados = dotación activa.</p>
+      ${stZ.map(x=>barRow(`${x.nombre} · ${x.ha} ha`,x.ha>0?x.enc/x.ha:0,maxEH,`${x.enc} enc. · ${x.ha>0?(x.enc/x.ha).toFixed(2):'—'} enc./ha · ${x.ha>0?(x.horas/hj/x.ha).toFixed(1):'—'} jorn./ha · ${x.ha>0?fmtCLP(costoDeHoras(x.horas)/x.ha):'—'}/ha`)
+        +x.epocas.map(e=>`<div style="font-size:11px;color:var(--muted);margin:-4px 0 8px 10px">↳ ${e.nombre}${e.ha!=null?` · ${e.ha} ha`:''}: ${(e.horas/hj).toFixed(1)} jorn.${e.ha?` · ${(e.horas/hj/e.ha).toFixed(1)} jorn./ha · ${fmtCLP(costoDeHoras(e.horas)/e.ha)}/ha`:''}</div>`).join('')).join('')}
+    </div>`;
+  }catch(e){zonasHTML=`<div class="card"><div class="card-title">🗺 Zonas</div><p style="font-size:11px;color:var(--red)">No se pudieron leer las 3 zonas: ${escH(e.message)}</p></div>`}
   div.innerHTML=`
+    ${zonasHTML}
+    <div class="card">
+      <div class="card-title">💰 % del costo por labor — ${escH(pD().nombre)}</div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Total ${fmtCLP(costoDeHoras(totLH))} · ${totLH.toFixed(1)} h. El costo es proporcional a las horas.</p>
+      ${labPct.length?labPct.map(x=>barRow(`${x.li.code}. ${escH(x.li.desc)}`,x.h,maxLP,`${pctTxt(x.h,totLH)}% · ${fmtCLP(costoDeHoras(x.h))}`)).join(''):'<div class="empty"><div>Sin horas registradas</div></div>'}
+    </div>
     <div class="card">
       <div class="card-title">⏱ Horas y costo por encargado</div>
       ${costoNota}
