@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-15-6';
+const APP_V = '2026-09-29-1';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -1032,6 +1032,7 @@ auth.onAuthStateChanged(async user=>{
 });
 
 function bootApp(){
+  setTimeout(()=>{try{progSyncDrafts();}catch(e){}},4000);
   document.getElementById('loginScreen').style.display='none';
   document.getElementById('appScreen').style.display='block';
 
@@ -2178,26 +2179,50 @@ async function renderProg(){
 function openModalNuevaProg(subjefe,mondayIso){
   const progDays=getProgDays(mondayIso);
   const dayNames=['Miércoles','Jueves','Viernes','Lunes','Martes'];
-  window._progEdit={predioId:activePred,subjefe,mondayIso,dias:{}};
+  window._progEdit={predioId:activePred,subjefe,mondayIso,dias:{},open:true,dirty:false,rev:0,savedRev:0,saving:false,timer:null,loaded:false};
   progDays.forEach(iso=>{window._progEdit.dias[iso]=[];});
   document.getElementById('modalContent').innerHTML=`
     <div class="modal-title">📋 Programación — ${subjefe}</div>
     <div class="modal-sub">Semana del ${fDMY(mondayIso)}</div>
+    <div id="progSaveStatus" style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);margin:-4px 0 10px;min-height:14px">Autoguardado activo</div>
     <div id="progModalDias"></div>
     <button class="btn btn-primary" onclick="saveProgModal()">Guardar programación</button>`;
-  renderProgModalDias(progDays,dayNames);
-  // load existing if any
+  document.getElementById('progModalDias').innerHTML='<div class="empty" style="padding:18px">Cargando programación…</div>';
+  const ed=window._progEdit;
+  const draft=progDraftGet(ed.predioId,subjefe,mondayIso);
+  const usarBorrador=()=>{progDays.forEach(iso=>{ed.dias[iso]=(draft.dias||{})[iso]||[];});};
+  // Se carga lo guardado en Firebase ANTES de permitir editar (así el autoguardado nunca pisa datos no cargados)
   colProg(activePred,subjefe).doc(mondayIso).get().then(snap=>{
-    if(snap.exists){
-      const data=snap.data();const plv=recLV(data);
-      progDays.forEach(iso=>{
-        window._progEdit.dias[iso]=((data.dias||{})[iso]||[]).map(t=>{
-          if(plv>=2)return t;
-          const nid=normLaborId(t.laborId,plv);
-          return {...t,laborId:(typeof nid==='number')?nid:null};
+    if(window._progEdit!==ed)return;
+    const data=snap.exists?snap.data():null;
+    let recuperado=false;
+    if(draft&&(!data||(draft.ts||0)>(data.ts||0))){usarBorrador();recuperado=true;}
+    else{
+      if(draft)progDraftDel(ed.predioId,subjefe,mondayIso);
+      if(data){
+        const plv=recLV(data);
+        progDays.forEach(iso=>{
+          ed.dias[iso]=((data.dias||{})[iso]||[]).map(t=>{
+            if(plv>=2)return t;
+            const nid=normLaborId(t.laborId,plv);
+            return {...t,laborId:(typeof nid==='number')?nid:null};
+          });
         });
-      });
-      renderProgModalDias(progDays,dayNames);
+      }
+    }
+    ed.loaded=true;
+    renderProgModalDias(progDays,dayNames);
+    if(recuperado){progMarkDirty();toast('📝 Se recuperó un borrador sin guardar de esta semana');}
+  }).catch(e=>{
+    if(window._progEdit!==ed)return;
+    if(draft){
+      // sin conexión pero con borrador local: se puede seguir editando el borrador
+      usarBorrador();ed.loaded=true;renderProgModalDias(progDays,dayNames);ed.dirty=true;ed.rev++;
+      progSetStatus('⚠️ Sin conexión — editando el borrador guardado en el teléfono','#B5651D');
+    }else{
+      // sin conexión y sin borrador: no se permite editar, para no pisar la programación guardada
+      document.getElementById('progModalDias').innerHTML='<div class="empty" style="padding:18px">⚠️ Sin conexión: no se pudo cargar la programación guardada.<br>Intenta de nuevo cuando tengas señal.</div>';
+      progSetStatus('');
     }
   });
   document.getElementById('overlay').classList.add('open');
@@ -2221,23 +2246,111 @@ function progTaskFormHTML(dayIso,ti,t={}){
     <div class="form-row"><label>Labor</label><select onchange="updPT('${dayIso}',${ti},'laborId',parseInt(this.value))"><option value="">— Seleccionar —</option>${LABORES.map(l=>`<option value="${l.id}"${t.laborId===l.id?' selected':''}>${l.id}. ${l.d}</option>`).join('')}</select></div>
     <div class="form-grid">
       <div><label>Postura</label><select onchange="updPT('${dayIso}',${ti},'postura',parseInt(this.value)||null)"><option value="">—</option>${[1,2,3].map(p=>`<option value="${p}"${t.postura===p?' selected':''}>Postura ${p}</option>`).join('')}</select></div>
-      <div><label>Meta mesas</label><input type="number" placeholder="120" min="0" value="${t.metaMesas||''}" onchange="updPT('${dayIso}',${ti},'metaMesas',parseInt(this.value)||0)"></div>
+      <div><label>Meta mesas</label><input type="number" placeholder="120" min="0" value="${t.metaMesas||''}" oninput="updPT('${dayIso}',${ti},'metaMesas',parseInt(this.value)||0)"></div>
     </div>
-    <div><label>Notas</label><input type="text" placeholder="Indicaciones…" value="${t.notas||''}" onchange="updPT('${dayIso}',${ti},'notas',this.value)"></div>
+    <div><label>Notas</label><input type="text" placeholder="Indicaciones…" value="${(t.notas||'').replace(/"/g,'&quot;')}" oninput="updPT('${dayIso}',${ti},'notas',this.value)"></div>
   </div>`;
 }
-function addProgTask(dayIso){if(!window._progEdit.dias[dayIso])window._progEdit.dias[dayIso]=[];window._progEdit.dias[dayIso].push({laborId:null,postura:null,metaMesas:0,notas:''});const c=document.getElementById(`ptasks-${dayIso}`);if(c)c.innerHTML=window._progEdit.dias[dayIso].map((t,ti)=>progTaskFormHTML(dayIso,ti,t)).join('');}
-function rmProgTask(dayIso,ti){window._progEdit.dias[dayIso].splice(ti,1);const c=document.getElementById(`ptasks-${dayIso}`);if(c)c.innerHTML=window._progEdit.dias[dayIso].map((t,i)=>progTaskFormHTML(dayIso,i,t)).join('');}
-function updPT(dayIso,ti,field,value){if(window._progEdit.dias[dayIso][ti])window._progEdit.dias[dayIso][ti][field]=value;}
+function addProgTask(dayIso){if(!window._progEdit.dias[dayIso])window._progEdit.dias[dayIso]=[];window._progEdit.dias[dayIso].push({laborId:null,postura:null,metaMesas:0,notas:''});const c=document.getElementById(`ptasks-${dayIso}`);if(c)c.innerHTML=window._progEdit.dias[dayIso].map((t,ti)=>progTaskFormHTML(dayIso,ti,t)).join('');progMarkDirty();}
+function rmProgTask(dayIso,ti){window._progEdit.dias[dayIso].splice(ti,1);const c=document.getElementById(`ptasks-${dayIso}`);if(c)c.innerHTML=window._progEdit.dias[dayIso].map((t,i)=>progTaskFormHTML(dayIso,i,t)).join('');progMarkDirty();}
+function updPT(dayIso,ti,field,value){if(window._progEdit.dias[dayIso][ti]){window._progEdit.dias[dayIso][ti][field]=value;progMarkDirty();}}
+// ── AUTOGUARDADO DE PROGRAMACIÓN (2026-09-29) ──
+// 1) cada cambio se guarda en Firebase 1,5 s después de la última edición
+// 2) al cerrar el modal se guarda lo pendiente
+// 3) borrador local (localStorage) de respaldo si no hay conexión; se sube al volver la señal
+// 4) el botón "Guardar programación" guarda de inmediato y cierra
+const PROG_DRAFT_PFX='fl_progDraft|';
+const PROG_AUTOSAVE_MS=1500;
+function progDraftKey(pid,sub,mon){return PROG_DRAFT_PFX+pid+'|'+sub+'|'+mon;}
+function progDraftGet(pid,sub,mon){try{const r=localStorage.getItem(progDraftKey(pid,sub,mon));return r?JSON.parse(r):null;}catch(e){return null;}}
+function progDraftSet(ed){try{localStorage.setItem(progDraftKey(ed.predioId,ed.subjefe,ed.mondayIso),JSON.stringify({predioId:ed.predioId,subjefe:ed.subjefe,mondayIso:ed.mondayIso,dias:ed.dias,ts:Date.now()}));}catch(e){}}
+function progDraftDel(pid,sub,mon){try{localStorage.removeItem(progDraftKey(pid,sub,mon));}catch(e){}}
+function progSetStatus(txt,color){const el=document.getElementById('progSaveStatus');if(el&&window._progEdit&&window._progEdit.open){el.textContent=txt;el.style.color=color||'var(--muted)';}}
+function progHora(){const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+function progMarkDirty(){
+  const ed=window._progEdit;if(!ed)return;
+  ed.dirty=true;ed.rev++;
+  progDraftSet(ed);
+  progSetStatus('✏️ Cambios sin guardar…');
+  clearTimeout(ed.timer);
+  ed.timer=setTimeout(()=>progAutoSave(ed),PROG_AUTOSAVE_MS);
+}
+function progWrite(pid,sub,mon,dias){
+  // Sin caché offline, set() queda esperando hasta que vuelva la red: se limita la espera a 12 s
+  const w=colProg(pid,sub).doc(mon).set({semana:mon,dias,lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid});
+  const t=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000));
+  return Promise.race([w,t]);
+}
+async function progAutoSave(ed){
+  ed=ed||window._progEdit;if(!ed||!ed.loaded)return false;
+  clearTimeout(ed.timer);ed.timer=null;
+  if(ed.rev===ed.savedRev){ed.dirty=false;return true;}
+  if(ed.saving){ed.pendingAfter=true;return false;}
+  if(!navigator.onLine){progSetStatus('⚠️ Sin conexión — borrador guardado en el teléfono','#B5651D');return false;}
+  ed.saving=true;const rev=ed.rev;
+  progSetStatus('⏳ Guardando…');
+  let ok=false;
+  try{
+    await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,JSON.parse(JSON.stringify(ed.dias)));
+    ed.savedRev=rev;ok=true;
+    if(ed.rev===rev){ed.dirty=false;progDraftDel(ed.predioId,ed.subjefe,ed.mondayIso);progSetStatus('✓ Guardado '+progHora(),'var(--green)');}
+  }catch(e){
+    progSetStatus(e.message==='timeout'?'⚠️ Sin señal — se reintentará; borrador en el teléfono':'⚠️ No se pudo guardar: '+e.message,'#B5651D');
+    if(ed.open){clearTimeout(ed.timer);ed.timer=setTimeout(()=>progAutoSave(ed),20000);}
+  }
+  ed.saving=false;
+  if(ed.rev!==ed.savedRev&&(ed.pendingAfter||ok)){ed.pendingAfter=false;clearTimeout(ed.timer);ed.timer=setTimeout(()=>progAutoSave(ed),PROG_AUTOSAVE_MS);}
+  return ok;
+}
+function progFlushOnClose(){
+  const ed=window._progEdit;if(!ed||!ed.open)return;
+  ed.open=false;
+  if(ed.rev!==ed.savedRev){
+    progAutoSave(ed).then(ok=>{toast(ok?'✅ Programación guardada':'📝 Sin conexión: la programación quedó en el teléfono y se subirá al volver la señal');});
+  }
+}
 async function saveProgModal(){
-  const {predioId,subjefe,mondayIso,dias}=window._progEdit;
+  const ed=window._progEdit;if(!ed)return;
+  if(!ed.loaded){toast('Espera a que cargue la programación');return;}
+  clearTimeout(ed.timer);ed.timer=null;
   loading(true,'Guardando programación…');
   try{
-    await colProg(predioId,subjefe).doc(mondayIso).set({semana:mondayIso,dias,lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid});
+    await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,JSON.parse(JSON.stringify(ed.dias)));
+    ed.savedRev=ed.rev;ed.dirty=false;
+    progDraftDel(ed.predioId,ed.subjefe,ed.mondayIso);
     closeModal();renderProg();toast('✅ Programación guardada');
-  }catch(e){toast('Error: '+e.message)}
+  }catch(e){
+    progDraftSet(ed);
+    toast(e.message==='timeout'?'📝 Sin señal: quedó guardada en el teléfono y se subirá al volver la conexión':'Error: '+e.message);
+  }
   loading(false);
 }
+// Sube los borradores locales pendientes (al iniciar sesión y al volver la conexión)
+let progSyncBusy=false;
+async function progSyncDrafts(){
+  if(progSyncBusy||!currentUser||!navigator.onLine)return;
+  progSyncBusy=true;
+  try{
+    const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.indexOf(PROG_DRAFT_PFX)===0)keys.push(k);}
+    let n=0;
+    for(const k of keys){
+      let d;try{d=JSON.parse(localStorage.getItem(k));}catch(e){continue;}
+      if(!d||!d.predioId||!d.subjefe||!d.mondayIso)continue;
+      const ed=window._progEdit;
+      if(ed&&ed.open&&ed.predioId===d.predioId&&ed.subjefe===d.subjefe&&ed.mondayIso===d.mondayIso){if(ed.rev!==ed.savedRev)progAutoSave(ed);continue;}
+      try{
+        const snap=await colProg(d.predioId,d.subjefe).doc(d.mondayIso).get();
+        const srv=snap.exists?snap.data():null;
+        if(!srv||(d.ts||0)>(srv.ts||0)){await progWrite(d.predioId,d.subjefe,d.mondayIso,d.dias);n++;}
+        localStorage.removeItem(k);
+      }catch(e){}
+    }
+    if(n)toast(n>1?'☁️ Se subieron '+n+' programaciones guardadas sin conexión':'☁️ Se subió la programación guardada sin conexión');
+  }catch(e){}
+  progSyncBusy=false;
+}
+window.addEventListener('online',()=>{setTimeout(progSyncDrafts,1500);});
+setInterval(()=>{try{progSyncDrafts();}catch(e){}},120000); // reintento por si el teléfono cree tener red pero no hay señal
 
 // ══════════════════════════════════════════════
 // CONFIG + WORKERS
@@ -2737,7 +2850,7 @@ async function guardarEdicionUsuario(uid){
 // ══════════════════════════════════════════════
 // MODAL
 // ══════════════════════════════════════════════
-function closeModal(){document.getElementById('overlay').classList.remove('open')}
+function closeModal(){try{progFlushOnClose();}catch(e){}document.getElementById('overlay').classList.remove('open')}
 
 // ══════════════════════════════════════════════
 // INFORMES (admin)
