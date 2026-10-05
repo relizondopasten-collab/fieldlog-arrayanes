@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-10-05-2';
+const APP_V = '2026-10-05-3';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -2282,6 +2282,84 @@ function populateProgSubjefe(){
   if(!cur&&pD().subjefes.length===1)sel.value=pD().subjefes[0];else sel.value=cur;
 }
 
+function progPintarDias(prog,progDays,mondayIso,subjefe,contentDiv){
+  progDays.forEach(dayIso=>{
+    const tasks=(prog.dias||{})[dayIso]||[];
+    const dayName=progDayName(mondayIso,dayIso);
+    const isToday=dayIso===todayIso;
+    const wsProg=wsZonaConPrestados();
+    let realEntries=rCache.filter(r=>r.fecha===dayIso&&wsProg.some(w=>w.id===r.workerId&&w.subjefe===subjefe));
+    const card=document.createElement('div');card.className='prog-day-card';
+    if(isToday)card.style.boxShadow='0 0 0 2px var(--green),0 2px 12px rgba(0,0,0,.10)';
+    const progLV=recLV(prog);
+    let tasksHTML=tasks.length?tasks.map((t,i)=>{
+      const l=laborInfo(t.laborId,progLV);
+      const tNorm=normLaborId(t.laborId,progLV);
+      const realMesas=realEntries.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>normLaborId(lr.laborId,recLV(e))===tNorm).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
+      const pct=t.metaMesas>0?Math.min(100,Math.round(realMesas/t.metaMesas*100)):null;
+      const bc=pct===null?'var(--green)':pct>=100?'var(--c-primor)':pct>=60?'#F4A261':'var(--red)';
+      return `<div class="prog-task">
+        <div class="prog-task-num">${i+1}.</div>
+        <div class="prog-task-info">
+          <div class="prog-task-labor">${l?`<span style="color:var(--muted);font-family:'DM Mono',monospace">${t.laborId}.</span> ${l.d}`:'—'}</div>
+          <div class="prog-task-meta">
+            <span class="prog-tag ptag-mod">📍 ${t.postura?'Postura '+t.postura:(t.modulo?'Módulo '+t.modulo:'—')}</span>
+            ${t.metaMesas?`<span class="prog-tag ptag-meta">🎯 ${t.metaMesas} mesas</span>`:''}
+            ${realMesas?`<span class="prog-tag ptag-real">✅ ${realMesas} real</span>`:''}
+          </div>
+          ${t.metaMesas&&pct!==null?`<div class="prog-vs"><span class="prog-vs-label">Avance</span><div class="prog-vs-bar-wrap"><div class="prog-vs-bar" style="width:${pct}%;background:${bc}"></div></div><span class="prog-vs-pct" style="color:${bc}">${pct}%</span></div>`:''}
+          ${t.notas?`<div style="font-size:11px;color:var(--muted);margin-top:4px">📌 ${t.notas}</div>`:''}
+        </div>
+      </div>`;
+    }).join(''):`<div class="prog-empty-day">Sin tareas programadas</div>`;
+    card.innerHTML=`<div class="prog-day-hdr">
+      <div><div class="prog-day-name">${dayName}${isToday?' <span style="font-size:9px;background:var(--green);color:#fff;padding:1px 6px;border-radius:10px;vertical-align:middle">Hoy</span>':''}</div>
+      <div class="prog-day-date">${fDMY(dayIso)}</div></div>
+      ${tasks.length?`<span class="badge" style="background:var(--sand);color:var(--dark)">${tasks.length} tarea${tasks.length>1?'s':''}</span>`:''}
+    </div><div class="prog-day-body">${tasksHTML}</div>`;
+    contentDiv.appendChild(card);
+  });
+}
+
+// Programación de la semana anterior hecha en su último día (martes) o después:
+// los subjefes programan el martes sobre la semana que termina ese día, pero es para la semana siguiente.
+async function progPrevParaEstaSemana(pid,sub,wedIso){
+  const d=new Date(wedIso+'T12:00:00');d.setDate(d.getDate()-7);
+  const prevIso=d.toISOString().slice(0,10);
+  const snap=await colProg(pid,sub).doc(prevIso).get();
+  if(!snap.exists)return null;
+  const x=snap.data()||{};
+  if(x.movidoA||!x.dias)return null;
+  const n=Object.values(x.dias).reduce((a,v)=>a+((v||[]).length),0);
+  if(!n||!x.ts)return null;
+  const ultimo=getProgDays(prevIso)[4];                 // martes en que termina esa semana
+  const t=new Date(x.ts);t.setHours(12,0,0,0);
+  if(t.toISOString().slice(0,10)<ultimo)return null;   // hecha antes del martes: es de esa semana
+  return {prevIso,data:x,n,ts:x.ts};
+}
+let progRenderTok=0;
+// Lunes y martes, en la semana actual: botón directo para programar la semana que empieza el miércoles
+function progBtnSiguiente(subjefe,wedIso){
+  const dias=getProgDays(wedIso);
+  if(!(todayIso>=dias[3]&&todayIso<=dias[4]))return '';
+  const d=new Date(wedIso+'T12:00:00');d.setDate(d.getDate()+7);
+  const sig=d.toISOString().slice(0,10);
+  return `<button class="btn btn-primary" style="margin-bottom:8px" onclick="progNavSem(1);setTimeout(()=>openModalNuevaProg('${subjefe}','${sig}'),300)">📋 Programar semana siguiente (desde ${fDMY(sig)})</button>`;
+}
+async function progTraerAnterior(subjefe,destIso,prevIso){
+  loading(true,'Pasando programación…');
+  try{
+    const cur=await colProg(activePred,subjefe).doc(destIso).get();
+    if(cur.exists&&!cur.data().movidoA&&Object.values(cur.data().dias||{}).some(v=>(v||[]).length)){loading(false);toast('Esta semana ya tiene programación: no se pisa');return;}
+    const src=await colProg(activePred,subjefe).doc(prevIso).get();
+    if(!src.exists){loading(false);return;}
+    const x=src.data();
+    await colProg(activePred,subjefe).doc(destIso).set({semana:destIso,dias:progRemapDias(x.dias,prevIso,destIso),lv:recLV(x),ts:x.ts||Date.now(),creadoPor:x.creadoPor||currentUser.uid,traidaDe:subjefe+'|'+prevIso});
+    await colProg(activePred,subjefe).doc(prevIso).update({movidoA:destIso,movidoPor:currentUser.uid,movidoTs:Date.now()});
+    loading(false);toast('✅ Programación pasada a esta semana');
+  }catch(e){loading(false);toast('Error: '+e.message);}
+}
+
 async function renderProg(){
   const mondayIso=getProgMonday(progWeekOffset);
   const progDays=getProgDays(mondayIso);
@@ -2309,47 +2387,28 @@ async function renderProg(){
       contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div style="margin-bottom:12px">Sin programación para esta semana</div>
         ${raw&&raw.movidoA?`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">(Se movió a la semana del ${fDMY(raw.movidoA)})</div>`:''}
         <button class="btn btn-secondary" style="width:auto;padding:8px 14px" onclick="progBuscarGuardadas('${subjefe}','${mondayIso}')">🔎 Buscar programaciones guardadas</button></div>`;
-      newBtnDiv.innerHTML=`<button class="btn btn-primary" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">📋 Crear programación de semana</button>`;
+      newBtnDiv.innerHTML=progBtnSiguiente(subjefe,mondayIso)+`<button class="btn btn-primary" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">📋 Crear programación de semana</button>`;
+      // ¿Se programó el martes anterior sobre la semana pasada? Mostrarla de inmediato aquí
+      const tok=++progRenderTok;
+      progPrevParaEstaSemana(activePred,subjefe,mondayIso).then(c=>{
+        if(!c||tok!==progRenderTok||getProgMonday(progWeekOffset)!==mondayIso||document.getElementById('progSubjefe').value!==subjefe)return;
+        const fh=new Date(c.ts).toLocaleDateString('es-CL',{weekday:'long',day:'2-digit',month:'2-digit'});
+        contentDiv.innerHTML=`<div style="background:#FFF4E5;border:1px solid #F4A261;border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:13px">
+          📋 Programación hecha el <b>${fh}</b> (quedó guardada en la semana del ${fDMY(c.prevIso)}). Se muestra para esta semana.
+          <button class="btn btn-primary" style="margin-top:8px" onclick="progTraerAnterior('${subjefe}','${mondayIso}','${c.prevIso}')">📥 Traer a semana del ${fDMY(mondayIso)}</button></div>`;
+        const box=document.createElement('div');contentDiv.appendChild(box);
+        progPintarDias({...c.data,dias:progRemapDias(c.data.dias,c.prevIso,mondayIso)},progDays,mondayIso,subjefe,box);
+        const bb=document.createElement('div');bb.style.textAlign='center';bb.style.marginTop='6px';
+        bb.innerHTML=`<button class="btn btn-secondary" style="width:auto;padding:8px 14px" onclick="progBuscarGuardadas('${subjefe}','${mondayIso}')">🔎 Buscar programaciones guardadas</button>`;
+        contentDiv.appendChild(bb);
+        newBtnDiv.innerHTML=progBtnSiguiente(subjefe,mondayIso);
+      }).catch(e=>console.warn('progPrevParaEstaSemana',e));
       return;
     }
-    newBtnDiv.innerHTML=`<button class="btn btn-secondary" style="margin-top:4px" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">✏️ Editar programación</button>`;
+    progRenderTok++;
+    newBtnDiv.innerHTML=progBtnSiguiente(subjefe,mondayIso)+`<button class="btn btn-secondary" style="margin-top:4px" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">✏️ Editar programación</button>`;
     contentDiv.innerHTML='';
-    progDays.forEach(dayIso=>{
-      const tasks=(prog.dias||{})[dayIso]||[];
-      const dayName=progDayName(mondayIso,dayIso);
-      const isToday=dayIso===todayIso;
-      const wsProg=wsZonaConPrestados();
-      let realEntries=rCache.filter(r=>r.fecha===dayIso&&wsProg.some(w=>w.id===r.workerId&&w.subjefe===subjefe));
-      const card=document.createElement('div');card.className='prog-day-card';
-      if(isToday)card.style.boxShadow='0 0 0 2px var(--green),0 2px 12px rgba(0,0,0,.10)';
-      const progLV=recLV(prog);
-      let tasksHTML=tasks.length?tasks.map((t,i)=>{
-        const l=laborInfo(t.laborId,progLV);
-        const tNorm=normLaborId(t.laborId,progLV);
-        const realMesas=realEntries.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>normLaborId(lr.laborId,recLV(e))===tNorm).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
-        const pct=t.metaMesas>0?Math.min(100,Math.round(realMesas/t.metaMesas*100)):null;
-        const bc=pct===null?'var(--green)':pct>=100?'var(--c-primor)':pct>=60?'#F4A261':'var(--red)';
-        return `<div class="prog-task">
-          <div class="prog-task-num">${i+1}.</div>
-          <div class="prog-task-info">
-            <div class="prog-task-labor">${l?`<span style="color:var(--muted);font-family:'DM Mono',monospace">${t.laborId}.</span> ${l.d}`:'—'}</div>
-            <div class="prog-task-meta">
-              <span class="prog-tag ptag-mod">📍 ${t.postura?'Postura '+t.postura:(t.modulo?'Módulo '+t.modulo:'—')}</span>
-              ${t.metaMesas?`<span class="prog-tag ptag-meta">🎯 ${t.metaMesas} mesas</span>`:''}
-              ${realMesas?`<span class="prog-tag ptag-real">✅ ${realMesas} real</span>`:''}
-            </div>
-            ${t.metaMesas&&pct!==null?`<div class="prog-vs"><span class="prog-vs-label">Avance</span><div class="prog-vs-bar-wrap"><div class="prog-vs-bar" style="width:${pct}%;background:${bc}"></div></div><span class="prog-vs-pct" style="color:${bc}">${pct}%</span></div>`:''}
-            ${t.notas?`<div style="font-size:11px;color:var(--muted);margin-top:4px">📌 ${t.notas}</div>`:''}
-          </div>
-        </div>`;
-      }).join(''):`<div class="prog-empty-day">Sin tareas programadas</div>`;
-      card.innerHTML=`<div class="prog-day-hdr">
-        <div><div class="prog-day-name">${dayName}${isToday?' <span style="font-size:9px;background:var(--green);color:#fff;padding:1px 6px;border-radius:10px;vertical-align:middle">Hoy</span>':''}</div>
-        <div class="prog-day-date">${fDMY(dayIso)}</div></div>
-        ${tasks.length?`<span class="badge" style="background:var(--sand);color:var(--dark)">${tasks.length} tarea${tasks.length>1?'s':''}</span>`:''}
-      </div><div class="prog-day-body">${tasksHTML}</div>`;
-      contentDiv.appendChild(card);
-    });
+    progPintarDias(prog,progDays,mondayIso,subjefe,contentDiv);
   },err=>{
     loading(false);
     toast('Error escuchando cambios: '+err.message);
