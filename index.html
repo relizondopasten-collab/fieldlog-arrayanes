@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-09-29-4';
+const APP_V = '2026-10-05-1';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -918,8 +918,19 @@ const colFotos    = pid => db.collection('arr_fotos').doc(pid).collection('items
 // APP STATE
 // ══════════════════════════════════════════════
 let progListener = null; // Unsubscribe function for prog real-time listener
-const today    = new Date();
+// Fecha LOCAL (Chile). Se ancla a mediodía: toISOString() trabaja en UTC y,
+// sin el ancla, después de las 21:00 (UTC-3) daba la fecha de mañana.
+const today    = (()=>{const d=new Date();d.setHours(12,0,0,0);return d})();
 const todayIso = today.toISOString().slice(0,10);
+// Si la app queda abierta de un día para otro, recargar al volver a ella (sin modal abierto)
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible')return;
+  const n=new Date();n.setHours(12,0,0,0);
+  if(n.toISOString().slice(0,10)===todayIso)return;
+  const m=document.getElementById('overlay');
+  if(m&&m.classList.contains('open'))return;
+  location.reload();
+});
 let activePred = 'z1';
 let selDate    = todayIso;
 let progWeekOffset = 0;
@@ -2205,8 +2216,43 @@ function getProgMonday(offset=0){   // (nombre histórico; retorna el miércoles
   return d.toISOString().slice(0,10);
 }
 function getProgDays(startIso){
-  const base=new Date(startIso);
+  const base=new Date(startIso+'T12:00:00');
   return [0,1,2,5,6].map(o=>{const d=new Date(base);d.setDate(base.getDate()+o);return d.toISOString().slice(0,10)});
+}
+// Miércoles que inicia la semana de programación de una fecha ISO cualquiera
+function progMiercolesDe(iso){
+  const d=new Date(iso+'T12:00:00');
+  d.setDate(d.getDate()-((d.getDay()-3+7)%7));
+  return d.toISOString().slice(0,10);
+}
+// Pasa los días de una semana mal fechada (inicio ≠ miércoles) a la semana correcta, por posición
+function progRemapDias(dias,srcIso,wedIso){
+  const src=getProgDays(srcIso),dst=getProgDays(wedIso),out={};
+  dst.forEach((k,i)=>{out[k]=(dias||{})[src[i]]||[];});
+  return out;
+}
+// Reparación: hasta la versión 2026-09-29-4, al programar después de las 21:00 la semana
+// se guardaba con fecha del JUEVES (desfase UTC) y luego no aparecía. Si falta la semana
+// del miércoles y existe la del jueves, se copia a la fecha correcta y la otra se marca 'movidoA'.
+const progReparadas=new Set();
+async function progRepararSemana(pid,sub,wedIso){
+  const key=pid+'|'+sub+'|'+wedIso;
+  if(progReparadas.has(key))return false;
+  progReparadas.add(key);
+  try{
+    const d=new Date(wedIso+'T12:00:00');d.setDate(d.getDate()+1);
+    const thuIso=d.toISOString().slice(0,10);
+    const snap=await colProg(pid,sub).doc(thuIso).get();
+    if(!snap.exists)return false;
+    const data=snap.data();
+    if(!data||data.movidoA||!data.dias)return false;
+    const cur=await colProg(pid,sub).doc(wedIso).get();
+    if(cur.exists)return false;   // ya hay programación en la fecha correcta: no se pisa
+    await colProg(pid,sub).doc(wedIso).set({semana:wedIso,dias:progRemapDias(data.dias,thuIso,wedIso),lv:recLV(data),ts:data.ts||Date.now(),creadoPor:data.creadoPor||(currentUser&&currentUser.uid)||'',reparadoDe:thuIso});
+    await colProg(pid,sub).doc(thuIso).update({movidoA:wedIso});
+    toast('🔧 Programación de esta semana recuperada (estaba guardada con fecha desfasada)');
+    return true;
+  }catch(e){console.warn('progRepararSemana',e);return false;}
 }
 const PROG_DAY_NAMES={0:'Miércoles',1:'Jueves',2:'Viernes',5:'Lunes',6:'Martes'};
 function progDayName(mondayIso,dayIso){
@@ -2258,6 +2304,7 @@ async function renderProg(){
     const prog=snap.exists?snap.data():null;
 
     if(!prog){
+      progRepararSemana(activePred,subjefe,mondayIso);   // si estaba guardada con fecha desfasada, la trae (el listener vuelve a dibujar)
       contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div style="margin-bottom:12px">Sin programación para esta semana</div></div>`;
       newBtnDiv.innerHTML=`<button class="btn btn-primary" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">📋 Crear programación de semana</button>`;
       return;
@@ -2466,6 +2513,9 @@ async function progSyncDrafts(){
     for(const k of keys){
       let d;try{d=JSON.parse(localStorage.getItem(k));}catch(e){continue;}
       if(!d||!d.predioId||!d.subjefe||!d.mondayIso)continue;
+      // Borrador guardado con fecha desfasada (antes de 2026-10-05-1): pasarlo al miércoles correcto
+      const wedOk=progMiercolesDe(d.mondayIso);
+      if(wedOk!==d.mondayIso){d.dias=progRemapDias(d.dias,d.mondayIso,wedOk);d.mondayIso=wedOk;}
       const ed=window._progEdit;
       if(ed&&ed.open&&ed.predioId===d.predioId&&ed.subjefe===d.subjefe&&ed.mondayIso===d.mondayIso){if(ed.rev!==ed.savedRev)progAutoSave(ed);continue;}
       try{
@@ -3093,7 +3143,7 @@ async function fetchProgramaciones(f){
       snap.docs.forEach(d=>{
         const data=d.data();
         // Solo semanas que se solapan con el rango (lunes <= hasta y algún día >= desde)
-        if(data.semana&&data.dias){
+        if(data.semana&&data.dias&&!data.movidoA){
           const monday=data.semana;
           const days=Object.keys(data.dias);
           const hasOverlap=days.some(iso=>iso>=f.desde&&iso<=f.hasta);
