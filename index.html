@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-10-05-1';
+const APP_V = '2026-10-05-2';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -2301,11 +2301,14 @@ async function renderProg(){
   loading(true,'Cargando programación…');
   progListener=colProg(activePred,subjefe).doc(mondayIso).onSnapshot(snap=>{
     loading(false);
-    const prog=snap.exists?snap.data():null;
+    const raw=snap.exists?snap.data():null;
+    const prog=raw&&!raw.movidoA?raw:null;
 
     if(!prog){
       progRepararSemana(activePred,subjefe,mondayIso);   // si estaba guardada con fecha desfasada, la trae (el listener vuelve a dibujar)
-      contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div style="margin-bottom:12px">Sin programación para esta semana</div></div>`;
+      contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div style="margin-bottom:12px">Sin programación para esta semana</div>
+        ${raw&&raw.movidoA?`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">(Se movió a la semana del ${fDMY(raw.movidoA)})</div>`:''}
+        <button class="btn btn-secondary" style="width:auto;padding:8px 14px" onclick="progBuscarGuardadas('${subjefe}','${mondayIso}')">🔎 Buscar programaciones guardadas</button></div>`;
       newBtnDiv.innerHTML=`<button class="btn btn-primary" onclick="openModalNuevaProg('${subjefe}','${mondayIso}')">📋 Crear programación de semana</button>`;
       return;
     }
@@ -2353,6 +2356,77 @@ async function renderProg(){
   });
 }
 
+// ── Buscar programaciones guardadas (todas las semanas, todos los subjefes de la zona) ──
+// Sirve para encontrar una programación hecha en la semana equivocada y traerla a la semana que se está viendo.
+let progBusq=[];
+async function progBuscarGuardadas(subjefe,destIso){
+  const subs=[...new Set([subjefe,...(pD().subjefes||[])].filter(Boolean))];
+  loading(true,'Buscando programaciones…');
+  const res=[];
+  for(const sub of subs){
+    try{
+      const snap=await colProg(activePred,sub).get();
+      snap.docs.forEach(d=>{
+        const x=d.data()||{};
+        if(x.movidoA)return;
+        const dias=x.dias||{};
+        const n=Object.values(dias).reduce((a,v)=>a+((v||[]).length),0);
+        if(!n)return;
+        res.push({sub,id:d.id,ts:x.ts||0,n,dias,lv:recLV(x)});
+      });
+    }catch(e){console.warn('progBuscarGuardadas',sub,e);}
+  }
+  loading(false);
+  res.sort((a,b)=>b.ts-a.ts);
+  progBusq=res.slice(0,12);
+  const fh=ts=>{if(!ts)return '—';const d=new Date(ts);return d.toLocaleDateString('es-CL',{weekday:'short',day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});};
+  const rows=progBusq.map((r,i)=>{
+    const ok=progMiercolesDe(r.id)===r.id;
+    const fin=getProgDays(progMiercolesDe(r.id))[4];
+    return `<div style="border:1px solid var(--sand);border-radius:8px;padding:10px;margin-bottom:8px;${r.id===destIso&&r.sub===subjefe?'opacity:.5':''}">
+      <div style="font-weight:600">Semana del ${fDMY(r.id)}${ok?' → '+fDMY(fin):' ⚠️ fecha desfasada'}</div>
+      <div style="font-size:12px;color:var(--muted)">👤 ${r.sub} · ${r.n} tarea${r.n>1?'s':''} · guardada ${fh(r.ts)}</div>
+      ${r.id===destIso&&r.sub===subjefe?'':`<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary" style="width:auto;padding:6px 10px;font-size:12px" onclick="progVerSemana('${r.sub}','${r.id}')">👁 Ver</button>
+        <button class="btn btn-primary" style="width:auto;padding:6px 10px;font-size:12px" onclick="progTraer(${i},'${subjefe}','${destIso}')">📥 Traer a semana del ${fDMY(destIso)}</button>
+      </div>`}
+    </div>`;
+  }).join('');
+  document.getElementById('modalContent').innerHTML=`
+    <div class="modal-title">🔎 Programaciones guardadas</div>
+    <div class="modal-sub">Zona activa · más recientes primero (fecha y hora en que se guardaron)</div>
+    ${rows||'<div class="empty" style="padding:18px">No hay programaciones guardadas en esta zona</div>'}
+    <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;margin:8px 0 10px"><input type="checkbox" id="progTraerMover" checked style="margin-top:2px">
+      <span>Al traer, dejar vacía la semana original (marcar que estaba en la semana equivocada). Si la desmarcas, se copia y la original queda igual.</span></label>
+    <button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`;
+  document.getElementById('overlay').classList.add('open');
+}
+function progVerSemana(sub,iso){
+  closeModal();
+  const sel=document.getElementById('progSubjefe');
+  if(sel&&[...sel.options].some(o=>o.value===sub))sel.value=sub;
+  progGoToWeek(progMiercolesDe(iso));
+}
+async function progTraer(i,subjefe,destIso){
+  const r=progBusq[i];if(!r)return;
+  const mover=document.getElementById('progTraerMover')?.checked;
+  if(!confirm(`¿Traer la programación de ${r.sub} (semana del ${fDMY(r.id)}) a la semana del ${fDMY(destIso)} de ${subjefe}?\n\nLos días se pasan en orden: miércoles→miércoles … martes→martes.`))return;
+  loading(true,'Copiando programación…');
+  try{
+    const cur=await colProg(activePred,subjefe).doc(destIso).get();
+    if(cur.exists&&!cur.data().movidoA){
+      const n=Object.values(cur.data().dias||{}).reduce((a,v)=>a+((v||[]).length),0);
+      if(n){loading(false);toast('La semana de destino ya tiene programación: no se pisa');return;}
+    }
+    // si el documento está desfasado, sus días vienen de getProgDays(r.id); si no, de su miércoles
+    const dias=progRemapDias(r.dias,r.id,destIso);
+    await colProg(activePred,subjefe).doc(destIso).set({semana:destIso,dias,lv:r.lv,ts:Date.now(),creadoPor:currentUser.uid,traidaDe:r.sub+'|'+r.id});
+    if(mover&&!(r.sub===subjefe&&r.id===destIso))await colProg(activePred,r.sub).doc(r.id).update({movidoA:destIso,movidoPor:currentUser.uid,movidoTs:Date.now()});
+    loading(false);closeModal();
+    toast('✅ Programación traída a la semana del '+fDMY(destIso));
+  }catch(e){loading(false);toast('Error: '+e.message);}
+}
+
 function openModalNuevaProg(subjefe,mondayIso){
   const progDays=getProgDays(mondayIso);
   const dayNames=['Miércoles','Jueves','Viernes','Lunes','Martes'];
@@ -2360,7 +2434,8 @@ function openModalNuevaProg(subjefe,mondayIso){
   progDays.forEach(iso=>{window._progEdit.dias[iso]=[];});
   document.getElementById('modalContent').innerHTML=`
     <div class="modal-title">📋 Programación — ${subjefe}</div>
-    <div class="modal-sub">Semana del ${fDMY(mondayIso)}</div>
+    <div class="modal-sub">Semana del ${fDMY(mondayIso)} → ${fDMY(progDays[4])}</div>
+    ${progDays[4]<=todayIso?`<div style="background:#FFF4E5;border:1px solid #F4A261;border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:10px">⚠️ Esta semana ${progDays[4]===todayIso?'termina hoy':'ya terminó'}. Si vas a programar la semana que viene, cierra y avanza con ›.</div>`:''}
     <div id="progSaveStatus" style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);margin:-4px 0 10px;min-height:14px">Autoguardado activo</div>
     <div id="progModalDias"></div>
     <button class="btn btn-primary" onclick="saveProgModal()">Guardar programación</button>`;
