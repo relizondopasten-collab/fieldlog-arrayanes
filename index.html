@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-10-05-3';
+const APP_V = '2026-10-07-1';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -506,11 +506,13 @@ select:focus,input:focus{border-color:var(--green)}
         <button class="btn btn-secondary" onclick="generarInforme('cosecha')" style="font-size:11px;padding:8px">📦 Cosecha</button>
         <button class="btn btn-secondary" onclick="generarInforme('encargados')" style="font-size:11px;padding:8px">👨‍🌾 Por encargado ($)</button>
         <button class="btn btn-secondary" onclick="generarInforme('ranking')" style="font-size:11px;padding:8px">🏆 Ranking capacidades</button>
+        <button class="btn btn-secondary" onclick="generarInforme('eficiencia')" style="font-size:11px;padding:8px;grid-column:span 2">⚡ Eficiencia: mesas/hora por labor y por trabajador</button>
         <button class="btn btn-secondary" onclick="generarInforme('ausencias')" style="font-size:11px;padding:8px;grid-column:span 2">🏥 Ausencias, licencias y vacaciones</button>
         <button class="btn btn-secondary" onclick="generarInforme('zonas')" style="font-size:11px;padding:8px;grid-column:span 2">🗺 Zonas: ha vs personal y costo % por labor</button>
       </div>
       <button class="btn btn-primary" onclick="renderInfCharts()" style="margin-top:10px;background:var(--dark)">📊 Ver gráficos del periodo</button>
       <button class="btn btn-primary" onclick="generarDashboard()" style="margin-top:6px">📈 Descargar dashboard (HTML)</button>
+      <button class="btn btn-primary" onclick="generarInformeObs()" style="margin-top:6px;background:#6B4F2E">📷 Observaciones y fotos del periodo (HTML)</button>
       <div id="infMsg" style="margin-top:10px;font-size:11px;color:var(--muted)"></div>
     </div>
     <div id="infCharts"></div>
@@ -3589,6 +3591,162 @@ function buildSheetRankingLabor(porLabor){
   return rows;
 }
 
+// ── EFICIENCIA (rendimiento mesas por hora) ──
+// Solo considera líneas de labor con horas Y mesas registradas (rendimiento medible).
+function calcEficiencia(regs,ws){
+  const porLabor={}; // nid -> {horas,mesas,cajas,trab:{wid:{horas,mesas,cajas}}}
+  regs.forEach(r=>{
+    if(r.ausente)return;
+    const w=ws.find(x=>x.id===r.workerId);if(!w)return;
+    const lv=recLV(r);
+    (r.labores||[]).forEach(l=>{
+      if(!(l.horas>0)||!(l.mesas>0))return;
+      const nid=normLaborId(l.laborId,lv);
+      const L=porLabor[nid]=porLabor[nid]||{horas:0,mesas:0,cajas:0,trab:{}};
+      L.horas+=l.horas;L.mesas+=l.mesas;L.cajas+=l.cajas||0;
+      const T=L.trab[w.id]=L.trab[w.id]||{horas:0,mesas:0,cajas:0};
+      T.horas+=l.horas;T.mesas+=l.mesas;T.cajas+=l.cajas||0;
+    });
+  });
+  return porLabor;
+}
+function efKeys(ef){return Object.keys(ef).map(k=>String(k).startsWith('v1_')?k:Number(k)).sort((a,b)=>ef[b].horas-ef[a].horas)}
+function buildSheetEfLabor(ef){
+  const rows=[['Código','Labor','Horas (con mesas)','Mesas','Mesas por hora (equipo)','N° trabajadores','Mejor rendimiento','Rendimiento más bajo','Cajas por hora (cosecha)']];
+  efKeys(ef).forEach(k=>{
+    const m=ef[k],li=laborKeyInfo(k);
+    const rates=Object.entries(m.trab).map(([wid,t])=>({wid,r:t.mesas/t.horas})).sort((a,b)=>b.r-a.r);
+    const nm=wid=>{const w=wById(wid);return w?wDisplay(w):'(?)'};
+    const best=rates[0],worst=rates[rates.length-1];
+    rows.push([li.code,li.desc,r2(m.horas),m.mesas,r2(m.mesas/m.horas),rates.length,
+      best?`${nm(best.wid)} (${r2(best.r)} mesas/h)`:'',
+      rates.length>1?`${nm(worst.wid)} (${r2(worst.r)} mesas/h)`:'',
+      (k===ID_COSECHA&&m.cajas>0)?r2(m.cajas/m.horas):'']);
+  });
+  rows.push([]);rows.push(['Notas:']);
+  rows.push(['Mesas por hora = mesas ÷ horas. Solo se consideran líneas de labor que registran horas Y mesas (rendimiento medible); el resto de las horas no entra en este informe.']);
+  return rows;
+}
+function buildSheetEfTrab(ef,ws){
+  const rows=[['Trabajador','Subjefe','Código','Labor','Horas','Mesas','Mesas por hora','Promedio equipo','Índice eficiencia %']];
+  const porW={};
+  efKeys(ef).forEach(k=>{
+    const m=ef[k],avg=m.mesas/m.horas,li=laborKeyInfo(k);
+    Object.entries(m.trab).forEach(([wid,t])=>{(porW[wid]=porW[wid]||[]).push({li,horas:t.horas,mesas:t.mesas,rate:t.mesas/t.horas,avg})});
+  });
+  const items=Object.entries(porW).map(([wid,ls])=>{
+    const w=ws.find(x=>x.id===wid);
+    const th=ls.reduce((s,x)=>s+x.horas,0);
+    const idx=ls.reduce((s,x)=>s+(x.rate/x.avg*100)*x.horas,0)/th; // ponderado por horas
+    return{w,ls,th,idx};
+  }).filter(x=>x.w).sort((a,b)=>b.idx-a.idx);
+  items.forEach(it=>{
+    it.ls.sort((a,b)=>b.horas-a.horas).forEach(x=>rows.push([wDisplay(it.w),it.w.subjefe,x.li.code,x.li.desc,r2(x.horas),x.mesas,r2(x.rate),r2(x.avg),Math.round(x.rate/x.avg*100)]));
+    rows.push([wDisplay(it.w)+' — ÍNDICE GLOBAL',it.w.subjefe,'','',r2(it.th),'','','',Math.round(it.idx)]);
+  });
+  rows.push([]);rows.push(['Notas:']);
+  rows.push(['Índice 100% = igual al promedio del equipo en esa labor · 120% = 20% más rápido · 80% = 20% más lento.']);
+  rows.push(['El índice global de cada persona pondera sus labores por las horas trabajadas. Solo líneas con horas y mesas registradas.']);
+  return rows;
+}
+// Índice global de eficiencia por trabajador (para gráficos y dashboard)
+function efIndicePorTrab(ef,ws){
+  const porW={};
+  Object.keys(ef).forEach(k=>{
+    const m=ef[k],avg=m.mesas/m.horas;
+    Object.entries(m.trab).forEach(([wid,t])=>{
+      const o=porW[wid]=porW[wid]||{sum:0,th:0,nl:0};
+      o.sum+=(t.mesas/t.horas)/avg*100*t.horas;o.th+=t.horas;o.nl++;
+    });
+  });
+  return Object.entries(porW).map(([wid,o])=>{
+    const w=ws.find(x=>x.id===wid);
+    return w?{nombre:wDisplay(w),subjefe:w.subjefe,idx:Math.round(o.sum/o.th),horas:o.th,nl:o.nl}:null;
+  }).filter(Boolean).sort((a,b)=>b.idx-a.idx);
+}
+const efColor=p=>p>=100?'var(--green)':p>=85?'#F4A261':'var(--red)';
+const efColorHex=p=>p>=100?'#2D6A4F':p>=85?'#F4A261':'#D62828';
+
+// ── OBSERVACIONES ──
+function buildSheetObs(regs,ws){
+  const rows=[['Fecha','Trabajador','Subjefe','Labores / situación','Observación','N° fotos']];
+  regs.filter(r=>(r.obs&&String(r.obs).trim())||r.fotos).forEach(r=>{
+    const w=ws.find(x=>x.id===r.workerId);
+    const labs=r.ausente?('Ausente'+(TIPO_AUS[tipoAusenciaDe(r)]?': '+TIPO_AUS[tipoAusenciaDe(r)].t:'')):
+      (r.labores||[]).map(l=>{const li=laborInfo(l.laborId,recLV(r));return l.laborId+(li?' '+li.d:'')}).join(' / ');
+    rows.push([r.fecha,w?wDisplay(w):'(?)',w?w.subjefe:'',labs,r.obs||'',r.fotos||0]);
+  });
+  rows.splice(1,rows.length-1,...rows.slice(1).sort((a,b)=>a[0]===b[0]?String(a[1]).localeCompare(String(b[1])):String(a[0]).localeCompare(String(b[0]))));
+  return rows;
+}
+// Informe HTML de observaciones con las fotografías incrustadas (funciona sin internet)
+async function generarInformeObs(){
+  const f=getInfFiltros();if(!f)return;
+  const msg=document.getElementById('infMsg');msg.textContent='⏳ Generando informe de observaciones…';
+  try{
+    const ws=wsZonaConPrestados();
+    const regs=filtrarRegistros(f).filter(r=>(r.obs&&String(r.obs).trim())||r.fotos);
+    if(!regs.length){msg.textContent='⚠️ No hay observaciones ni fotos en el rango seleccionado';toast('Sin observaciones en el periodo');return}
+    // Todas las fotos del periodo en una sola consulta, agrupadas por registro
+    let fotosPorReg={};
+    if(regs.some(r=>r.fotos)){
+      msg.textContent='⏳ Descargando fotos del periodo…';
+      try{
+        const snap=await colFotos(activePred).where('fecha','>=',f.desde).where('fecha','<=',f.hasta).get();
+        snap.docs.forEach(d=>{const x=d.data();(fotosPorReg[x.registroId]=fotosPorReg[x.registroId]||[]).push(x)});
+        Object.values(fotosPorReg).forEach(a=>a.sort((x,y)=>(x.idx||0)-(y.idx||0)));
+      }catch(e){toast('⚠️ No se pudieron leer las fotos: '+e.message)}
+    }
+    const porFecha={};
+    regs.forEach(r=>{(porFecha[r.fecha]=porFecha[r.fecha]||[]).push(r)});
+    const fechas=Object.keys(porFecha).sort((a,b)=>b.localeCompare(a)); // más reciente primero
+    let nFotosTot=0;
+    const cuerpo=fechas.map(fe=>{
+      const items=porFecha[fe].map(r=>{
+        const w=ws.find(x=>x.id===r.workerId);
+        const labs=r.ausente?('🏥 Ausente'+(TIPO_AUS[tipoAusenciaDe(r)]?': '+TIPO_AUS[tipoAusenciaDe(r)].t:'')):
+          (r.labores||[]).map(l=>{const li=laborInfo(l.laborId,recLV(r));return l.laborId+(li?' '+li.d:'')+(l.mesas?` (${l.mesas} mesas${l.horas?' · '+l.horas+' h':''})`:(l.horas?` (${l.horas} h)`:''))}).join('  ·  ');
+        const ep=(r.cicloTemporada&&TNAMES[r.cicloTemporada])?`${TICONS[r.cicloTemporada]||''} ${TNAMES[r.cicloTemporada]}${r.cicloSector?' · '+r.cicloSector:''}`:'';
+        const fts=fotosPorReg[r.id]||[];nFotosTot+=fts.length;
+        return `<div class="obsit">
+          <div class="obsw">👤 ${dbEsc(w?wDisplay(w):'(desconocido)')}${w?` <span class="obss">· ${dbEsc(w.subjefe)}</span>`:''}${ep?` <span class="obss">· ${dbEsc(ep)}</span>`:''}</div>
+          ${labs?`<div class="obsl">${dbEsc(labs)}</div>`:''}
+          ${r.obs?`<div class="obst">📌 ${dbEsc(r.obs)}</div>`:''}
+          ${fts.length?`<div class="obsf">${fts.map((ft,i)=>`<img src="${ft.data}" alt="Foto ${i+1}" loading="lazy">`).join('')}</div>`:(r.fotos?`<div class="obsl">📷 ${r.fotos} foto(s) registradas que no se pudieron incluir</div>`:'')}
+        </div>`;
+      }).join('');
+      return `<div class="card"><h2>📅 ${fD(fe)}</h2>${items}</div>`;
+    }).join('');
+    const html='<!DOCTYPE html>'+`<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Observaciones FieldLog ${f.desde} a ${f.hasta}</title>
+<style>
+body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#F8F5EF;color:#2A2A2A;margin:0;padding:0 0 40px}
+.hdr{background:#1A2E1F;color:#B7E4C7;padding:22px 18px}
+.hdr h1{margin:0;font-size:20px}.hdr p{margin:5px 0 0;font-size:12px;color:#74C69D}
+.wrap{max-width:760px;margin:0 auto;padding:0 14px}
+.card{background:#fff;border-radius:14px;padding:14px;margin:12px 0;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.card h2{font-size:13px;margin:0 0 10px;color:#1A2E1F;text-transform:uppercase;letter-spacing:.5px}
+.obsit{border-top:1px solid #E9E3D7;padding:10px 0}.obsit:first-of-type{border-top:none;padding-top:2px}
+.obsw{font-size:13px;font-weight:700}.obss{font-weight:400;color:#7A7A7A;font-size:11px}
+.obsl{font-size:11px;color:#7A7A7A;margin-top:2px}
+.obst{font-size:13px;background:#FFF8E6;border-left:3px solid #D4A017;border-radius:6px;padding:7px 10px;margin-top:6px;white-space:pre-wrap}
+.obsf{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.obsf img{width:calc(50% - 4px);max-width:340px;border-radius:10px;display:block}
+@media (max-width:480px){.obsf img{width:100%}}
+</style></head><body>
+<div class="hdr"><h1>📷 FieldLog · Los Arrayanes — Observaciones del periodo</h1>
+<p>${dbEsc(pD().nombre)} · ${fD(f.desde)} → ${fD(f.hasta)}${f.subjefe?' · Subjefe: '+dbEsc(f.subjefe):''} · ${regs.length} observación(es) · Generado ${new Date().toLocaleString('es-CL')}</p></div>
+<div class="wrap">${cuerpo}</div></body></html>`;
+    const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`Arrayanes_Observaciones_${f.desde}_a_${f.hasta}.html`;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    msg.textContent=`✅ Descargado: Arrayanes_Observaciones_${f.desde}_a_${f.hasta}.html · ${regs.length} observación(es), ${nFotosTot} foto(s)${nFotosTot?' — incluye las fotos, puede pesar varios MB':''}`;
+  }catch(e){msg.textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+
 function aoaToSheet(rows){
   const ws=XLSX.utils.aoa_to_sheet(rows);
   // Calcular anchos automáticos
@@ -3637,6 +3795,16 @@ async function generarInforme(tipo){
       const fn=`Arrayanes_Zonas_ha_personal_${f.desde}_a_${f.hasta}.xlsx`;
       descargarXLSX(wb,fn);
       msg.textContent='✅ Descargado: '+fn+(cfgGlobal.costoJornada?'':' · ℹ️ Costo jornada no configurado: costos en $0 (los % sí son válidos).');
+      return;
+    }
+    else if(tipo==='eficiencia'){
+      const ef=calcEficiencia(regs,ws);
+      if(!Object.keys(ef).length){msg.textContent='⚠️ No hay labores con horas y mesas registradas en el rango (la eficiencia se mide en mesas/hora)';toast('Sin datos de rendimiento');return}
+      XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetEfLabor(ef)),'Eficiencia por labor');
+      XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetEfTrab(ef,ws)),'Eficiencia por trabajador');
+      const fn=`Arrayanes_Eficiencia_${f.desde}_a_${f.hasta}.xlsx`;
+      descargarXLSX(wb,fn);
+      msg.textContent='✅ Descargado: '+fn;
       return;
     }
     else if(tipo==='ranking'){
@@ -3688,8 +3856,10 @@ async function generarInformeCompleto(){
       ['6. Ausencias, licencias y vacaciones'],
       ['7. Apoyos'],
       ['8. Ranking capacidades (trabajadores y labores)'],
-      ['9. Zonas: superficie (ha) vs personal, jornadas y costo — 3 zonas'],
-      ['10. Costo % por labor en cada zona — 3 zonas'],
+      ['9. Eficiencia por labor y por trabajador (mesas/hora)'],
+      ['10. Observaciones del periodo (texto; las fotos van en el informe HTML de observaciones)'],
+      ['11. Zonas: superficie (ha) vs personal, jornadas y costo — 3 zonas'],
+      ['12. Costo % por labor en cada zona — 3 zonas'],
       [],
       ['Costo jornada hombre (CLP)',cfgGlobal.costoJornada||'(no configurado)'],
       ['Horas por jornada',cfgGlobal.horasJornada||8],
@@ -3706,6 +3876,10 @@ async function generarInformeCompleto(){
     const {porTrab,porLabor}=collectEvals(regs,ws);
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetRankingTrab(porTrab)),'Ranking trabajadores');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetRankingLabor(porLabor)),'Ranking labores');
+    const ef=calcEficiencia(regs,ws);
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetEfLabor(ef)),'Eficiencia por labor');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetEfTrab(ef,ws)),'Eficiencia por trabajador');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetObs(regs,ws)),'Observaciones');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetZonas(statsZonas(rz))),'Zonas ha y personal');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetLaborZonas(rz)),'Costo % labor por zona');
     const filename=`Arrayanes_Informe_${f.desde}_a_${f.hasta}.xlsx`;
@@ -3774,6 +3948,11 @@ async function generarDashboard(){
     const {porTrab,porLabor}=collectEvals(regs,ws);
     const trab=Object.values(porTrab).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
     const labsCap=Object.values(porLabor).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
+    // Eficiencia (mesas/hora)
+    const ef=calcEficiencia(regs,ws);
+    const efL=efKeys(ef).map(k=>({li:laborKeyInfo(k),m:ef[k],rate:ef[k].mesas/ef[k].horas}));
+    const maxEfR=Math.max(0.0001,...efL.map(x=>x.rate));
+    const efT=efIndicePorTrab(ef,ws);
     // Ausencias por motivo
     const ausCnt={};
     regs.filter(r=>r.ausente).forEach(r=>{const t=tipoAusenciaDe(r);ausCnt[t]=(ausCnt[t]||0)+1});
@@ -3819,6 +3998,8 @@ ${cfgGlobal.costoJornada?'':'<p class="note">ℹ️ Costo jornada no configurado
 <div class="card"><h2>🗺 Zonas: superficie vs personal y costo</h2><p class="note" style="margin:0 0 8px">Las 3 zonas en el periodo, sin filtro de subjefe.</p>${stZ.map(x=>dbBar(x.nombre+' · '+x.ha+' ha',x.enc+' enc. · '+(x.ha>0?(x.enc/x.ha).toFixed(2):'—')+' enc./ha · '+(x.ha>0?fmtCLP(costoDeHoras(x.horas)/x.ha):'—')+'/ha',x.ha>0?(x.enc/x.ha)/Math.max(...stZ.map(y=>y.ha>0?y.enc/y.ha:0),0.0001)*100:0,'#40916C')).join('')}${tabla(tZonas)}</div>
 <div class="card"><h2>🏆 Capacidad por trabajador</h2><p class="note" style="margin:0 0 8px">Según evaluaciones 1 (muy bien) · 2 (bien) · 3 (mal). 100% = todas «muy bien».</p>${trab.length?trab.map(m=>dbBar(m.nombre,m.pct+'% · '+m.n+' eval. · prom. '+m.avg.toFixed(2),m.pct,capColorHex(m.pct))).join(''):'<p class="note">Sin labores evaluadas en el periodo</p>'}</div>
 <div class="card"><h2>🎯 Capacidad por labor</h2>${labsCap.length?labsCap.map(m=>dbBar(m.code+'. '+m.desc,m.pct+'% · '+m.n+' eval.',m.pct,capColorHex(m.pct))).join(''):'<p class="note">Sin labores evaluadas en el periodo</p>'}</div>
+<div class="card"><h2>⚡ Eficiencia por labor (mesas/hora)</h2><p class="note" style="margin:0 0 8px">Mesas ÷ horas del equipo. Solo labores con horas y mesas registradas.</p>${efL.length?efL.map(x=>dbBar(x.li.code+'. '+x.li.desc,r2(x.rate)+' mesas/h · '+r2(x.m.horas)+' h · '+x.m.mesas+' mesas',x.rate/maxEfR*100,'#1D7A8C')).join(''):'<p class="note">Sin labores con horas y mesas en el periodo</p>'}</div>
+<div class="card"><h2>⚡ Eficiencia por trabajador</h2><p class="note" style="margin:0 0 8px">Índice 100% = promedio del equipo en cada labor, ponderado por horas. Verde ≥100% · naranjo 85–99% · rojo &lt;85%.</p>${efT.length?efT.map(m=>dbBar(m.nombre,m.idx+'% · '+r2(m.horas)+' h · '+m.nl+' labor(es)',Math.min(m.idx,150)/150*100,efColorHex(m.idx))).join(''):'<p class="note">Sin datos de rendimiento en el periodo</p>'}</div>
 <div class="card"><h2>🏥 Ausencias por motivo</h2>${Object.keys(ausCnt).length?Object.entries(ausCnt).sort((a,b)=>b[1]-a[1]).map(([t,n])=>dbBar(AUS_TXT[t]||t,n+' registro'+(n>1?'s':''),n/maxAus*100,'#B45309')).join(''):'<p class="note">Sin ausencias en el periodo</p>'}</div>
 <div class="card"><h2>👤 Detalle por trabajador</h2>${tabla(tTrab)}</div>
 <div class="card"><h2>👨‍🌾 Detalle por encargado (horas, jornadas y costo)</h2>${tabla(tEnc)}</div>
@@ -3849,6 +4030,11 @@ async function renderInfCharts(){
   const {porTrab,porLabor}=collectEvals(regs,ws);
   const trab=Object.values(porTrab).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
   const labs=Object.values(porLabor).map(m=>({...m,avg:m.sum/m.n,pct:capPct(m.sum/m.n)})).sort((a,b)=>b.pct-a.pct||b.n-a.n);
+  // Eficiencia (mesas/hora)
+  const ef=calcEficiencia(regs,ws);
+  const efL=efKeys(ef).map(k=>({li:laborKeyInfo(k),m:ef[k],rate:ef[k].mesas/ef[k].horas}));
+  const maxEfR=Math.max(0.0001,...efL.map(x=>x.rate));
+  const efT=efIndicePorTrab(ef,ws);
   const costoNota=cfgGlobal.costoJornada?'':`<p style="font-size:11px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:6px 10px;margin-bottom:8px">ℹ️ Configura el costo de la jornada (Config → Costo jornada hombre) para ver costos reales.</p>`;
   // % del costo por labor (zona activa, con filtro de subjefe)
   const hl=horasPorLabor(regs);const totLH=Object.values(hl).reduce((a,b)=>a+b,0);
@@ -3887,6 +4073,16 @@ async function renderInfCharts(){
     <div class="card">
       <div class="card-title">🌱 Capacidad por labor</div>
       ${labs.length?labs.map(m=>barRow(`${m.code}. ${m.desc}`,m.pct,100,`${m.pct}% · ${m.n} eval.`,capColor(m.pct))).join(''):'<div class="empty"><div>Sin labores evaluadas en el periodo</div></div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">⚡ Eficiencia por labor (mesas/hora)</div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Mesas ÷ horas del equipo. Solo labores con horas y mesas registradas.</p>
+      ${efL.length?efL.map(x=>barRow(`${x.li.code}. ${escH(x.li.desc)}`,x.rate,maxEfR,`${r2(x.rate)} mesas/h · ${r2(x.m.horas)} h · ${x.m.mesas} mesas`)).join(''):'<div class="empty"><div>Sin labores con horas y mesas en el periodo</div></div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">⚡ Eficiencia por trabajador</div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Índice 100% = promedio del equipo en cada labor, ponderado por horas. Verde ≥100% · naranjo 85–99% · rojo &lt;85%.</p>
+      ${efT.length?efT.map(m=>barRow(m.nombre,Math.min(m.idx,150),150,`${m.idx}% · ${r2(m.horas)} h · ${m.nl} labor(es)`,efColor(m.idx))).join(''):'<div class="empty"><div>Sin datos de rendimiento en el periodo</div></div>'}
     </div>`;
   div.scrollIntoView({behavior:'smooth'});
 }
