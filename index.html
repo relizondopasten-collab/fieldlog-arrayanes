@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-10-07-1';
+const APP_V = '2026-10-20-1';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -507,6 +507,8 @@ select:focus,input:focus{border-color:var(--green)}
         <button class="btn btn-secondary" onclick="generarInforme('encargados')" style="font-size:11px;padding:8px">👨‍🌾 Por encargado ($)</button>
         <button class="btn btn-secondary" onclick="generarInforme('ranking')" style="font-size:11px;padding:8px">🏆 Ranking capacidades</button>
         <button class="btn btn-secondary" onclick="generarInforme('eficiencia')" style="font-size:11px;padding:8px;grid-column:span 2">⚡ Eficiencia: mesas/hora por labor y por trabajador</button>
+        <button class="btn btn-secondary" onclick="generarInformeCapacidad()" style="font-size:11px;padding:8px">📐 Capacidad y carga (Excel)</button>
+        <button class="btn btn-secondary" onclick="generarInformeCapacidadHTML()" style="font-size:11px;padding:8px">📐 Capacidad y carga (HTML)</button>
         <button class="btn btn-secondary" onclick="generarInforme('ausencias')" style="font-size:11px;padding:8px;grid-column:span 2">🏥 Ausencias, licencias y vacaciones</button>
         <button class="btn btn-secondary" onclick="generarInforme('zonas')" style="font-size:11px;padding:8px;grid-column:span 2">🗺 Zonas: ha vs personal y costo % por labor</button>
       </div>
@@ -3667,6 +3669,224 @@ function efIndicePorTrab(ef,ws){
 const efColor=p=>p>=100?'var(--green)':p>=85?'#F4A261':'var(--red)';
 const efColorHex=p=>p>=100?'#2D6A4F':p>=85?'#F4A261':'#D62828';
 
+// ── CAPACIDAD DE AVANCE Y CARGA (plantas por trabajador) ──
+// Pregunta de la jefatura: ¿a quién conviene reducir o aumentar plantas/mesas?
+// Ritmo = mesas/hora comparado con la referencia de la ZONA en la MISMA labor (no se comparan labores distintas).
+// Índice 100 = ritmo de referencia. Se corrige hacia 100 cuando hay pocas horas (CAP_K) y se calcula un
+// intervalo con la variación día a día: solo se recomienda cambiar carga cuando el intervalo no cruza 100.
+const CAP_MIN_H=24,CAP_MIN_DIAS=5,CAP_K=24,CAP_UP=110,CAP_DOWN=90,CAP_MAXCHG=0.20,CAP_ROUND=500,CAP_MIN_TRAB_LAB=3;
+async function fetchRegsZona(pid,f){
+  try{
+    const s=await colRegistros(pid).where('fecha','>=',f.desde).where('fecha','<=',f.hasta).get();
+    return {regs:s.docs.map(d=>({id:d.id,...d.data()})),rango:true};
+  }catch(e){
+    return {regs:rCache.filter(r=>r.fecha>=f.desde&&r.fecha<=f.hasta),rango:false};
+  }
+}
+function capMediana(a){if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2}
+// regsZona: TODOS los registros de la zona en el rango (la referencia por labor usa toda la zona)
+function calcCapacidad(regsZona,ws,f){
+  const hj=cfgGlobal.horasJornada||8;
+  // 1) Líneas medibles (horas y mesas) por labor normalizada
+  const lineas=[];
+  regsZona.forEach(r=>{
+    if(r.ausente)return;const lv=recLV(r);
+    (r.labores||[]).forEach(l=>{if(l.horas>0&&l.mesas>0)lineas.push({r,wid:r.workerId,nid:normLaborId(l.laborId,lv),h:+l.horas,m:+l.mesas})});
+  });
+  // 2) Descarte de posibles errores de digitación: ritmo de la línea >5× o <0,2× la mediana de esa labor
+  const porLab={};lineas.forEach(x=>(porLab[x.nid]=porLab[x.nid]||[]).push(x.m/x.h));
+  const medLab={};Object.keys(porLab).forEach(k=>medLab[k]=capMediana(porLab[k]));
+  let descartadas=0;
+  const ok=lineas.filter(x=>{const md=medLab[x.nid],rt=x.m/x.h;if(md>0&&(rt>md*5||rt<md*0.2)){descartadas++;return false}return true});
+  // 3) Referencia por labor (toda la zona); solo labores hechas por ≥ CAP_MIN_TRAB_LAB personas
+  const ref={};
+  ok.forEach(x=>{const R=ref[x.nid]=ref[x.nid]||{h:0,m:0,w:new Set()};R.h+=x.h;R.m+=x.m;R.w.add(x.wid)});
+  Object.keys(ref).forEach(k=>{ref[k].rate=ref[k].m/ref[k].h;ref[k].nw=ref[k].w.size});
+  const comparable=k=>ref[k]&&ref[k].nw>=CAP_MIN_TRAB_LAB;
+  // 4) Acumulado por trabajador
+  const T={};
+  const tw=wid=>T[wid]=T[wid]||{h:0,m:0,e:0,hTot:0,dias:{},lab:{},nEval:0,sEval:0,nMal:0,regs:0};
+  regsZona.forEach(r=>{
+    if(r.ausente)return;const t=tw(r.workerId);t.regs++;
+    (r.labores||[]).forEach(l=>{t.hTot+=(+l.horas||0);if(l.eval){t.nEval++;t.sEval+=l.eval;if(l.eval===3)t.nMal++}});
+  });
+  ok.forEach(x=>{
+    if(!comparable(x.nid))return;
+    const t=tw(x.wid),e=x.h*ref[x.nid].rate;
+    t.h+=x.h;t.m+=x.m;t.e+=e;
+    const d=t.dias[x.r.fecha]=t.dias[x.r.fecha]||{h:0,m:0,e:0};d.h+=x.h;d.m+=x.m;d.e+=e;
+    const L=t.lab[x.nid]=t.lab[x.nid]||{h:0,m:0};L.h+=x.h;L.m+=x.m;
+  });
+  // 5) Indicadores y recomendación (solo trabajadores propios de la zona, activos)
+  const propios=ws.filter(w=>!w.prestadoDe&&esActivo(w)&&!w.consolidadoEn&&(!f.subjefe||w.subjefe===f.subjefe));
+  const filas=propios.map(w=>{
+    const t=T[w.id]||{h:0,m:0,e:0,hTot:0,dias:{},lab:{},nEval:0,sEval:0,nMal:0,regs:0};
+    const dv=Object.values(t.dias).filter(d=>d.h>=2&&d.e>0).map(d=>d.m/d.e*100);
+    const n=dv.length,mean=n?dv.reduce((s,v)=>s+v,0)/n:0;
+    const sd=n>1?Math.sqrt(dv.reduce((s,v)=>s+(v-mean)**2,0)/(n-1)):0;
+    const idx=t.e>0?t.m/t.e*100:null;
+    const adj=idx==null?null:(t.h*idx+CAP_K*100)/(t.h+CAP_K);
+    const half=n>=3?1.645*sd/Math.sqrt(n):null;      // IC 90% aprox. de la media diaria
+    const lo=half==null?null:adj-half,hi=half==null?null:adj+half;
+    const bajo85=n?dv.filter(v=>v<85).length/n:0;
+    const evalAvg=t.nEval?t.sEval/t.nEval:null,pMal=t.nEval?t.nMal/t.nEval:0;
+    const calMala=t.nEval>=3&&(evalAvg>2.2||pMal>=0.3);
+    const P=+w.plantas||0;
+    let conf=(t.h>=60&&n>=10)?'Alta':(t.h>=CAP_MIN_H&&n>=CAP_MIN_DIAS)?'Media':'Baja';
+    let rec,fac=1,cod;
+    if(conf==='Baja'){rec='Sin datos suficientes';cod='nd'}
+    else if(adj>=CAP_UP&&lo>=100&&calMala){rec='Rápido, pero revisar calidad antes de aumentar';cod='cal'}
+    else if(adj>=CAP_UP&&lo>=100){rec='Puede aumentar carga';cod='up';fac=Math.min(1+CAP_MAXCHG,adj/100)}
+    else if(adj<=CAP_DOWN&&hi<100){rec='Reducir carga';cod='down';fac=Math.max(1-CAP_MAXCHG,adj/100)}
+    else if(calMala){rec='Mantener · revisar calidad';cod='cal'}
+    else {rec='Mantener';cod='ok'}
+    const sug=(P&&fac!==1)?Math.round(P*fac/CAP_ROUND)*CAP_ROUND:P;
+    return{w,P,h:t.h,hTot:t.hTot,pctMed:t.hTot>0?t.h/t.hTot:0,dias:n,m:t.m,mesasJor:t.h>0?t.m/t.h*hj:0,
+      idx,adj,lo,hi,sd,cv:mean>0?sd/mean:0,bajo85,evalAvg,nEval:t.nEval,pMal,calMala,conf,rec,cod,sug,delta:sug-P,lab:t.lab};
+  }).sort((a,b)=>a.w.subjefe.localeCompare(b.w.subjefe)||((b.adj??-1)-(a.adj??-1)));
+  // Balance por subjefe
+  const bal={};
+  filas.forEach(x=>{const B=bal[x.w.subjefe]=bal[x.w.subjefe]||{n:0,P:0,lib:0,abs:0,up:0,down:0,nd:0,cal:0};
+    B.n++;B.P+=x.P;if(x.delta<0)B.lib+=-x.delta;if(x.delta>0)B.abs+=x.delta;
+    if(x.cod==='up')B.up++;if(x.cod==='down')B.down++;if(x.cod==='nd')B.nd++;if(x.cod==='cal')B.cal++});
+  return{filas,ref,bal,descartadas,nLineas:lineas.length,
+    labNoComp:Object.keys(ref).filter(k=>!comparable(k)).length};
+}
+const capPctTxt=v=>v==null?'':Math.round(v*100)+'%';
+function buildSheetCapacidad(C){
+  const rows=[['Subjefe','Trabajador','Plantas actuales','Horas totales','Horas medibles (con mesas)','% horas medibles','Días con datos','Mesas','Mesas por jornada','Índice ritmo bruto %','Índice ritmo ajustado %','Intervalo 90% (mín)','Intervalo 90% (máx)','% días bajo 85','Variabilidad día a día (CV)','N° evaluaciones','Evaluación promedio (1 muy bien · 3 mal)','% evaluaciones "mal"','Confiabilidad','Recomendación','Plantas sugeridas','Cambio de plantas']];
+  C.filas.forEach(x=>rows.push([x.w.subjefe,wDisplay(x.w),x.P||'(sin dato)',r2(x.hTot),r2(x.h),capPctTxt(x.pctMed),x.dias,x.m,r2(x.mesasJor),
+    x.idx==null?'':Math.round(x.idx),x.adj==null?'':Math.round(x.adj),x.lo==null?'':Math.round(x.lo),x.hi==null?'':Math.round(x.hi),
+    x.dias?capPctTxt(x.bajo85):'',x.dias>=3?r2(x.cv):'',x.nEval,x.evalAvg==null?'':r2(x.evalAvg),x.nEval?capPctTxt(x.pMal):'',
+    x.conf,x.rec,x.P?x.sug:'',x.P?(x.delta>0?'+':'')+x.delta:'']));
+  rows.push([]);rows.push(['Balance por subjefe','Encargados','Plantas actuales','Plantas que se liberan (reducir)','Plantas que pueden absorber (aumentar)','Saldo (liberan − absorben)','Pueden aumentar','Reducir','Revisar calidad','Sin datos suficientes']);
+  Object.entries(C.bal).forEach(([s,B])=>rows.push([s,B.n,B.P,B.lib,B.abs,B.lib-B.abs,B.up,B.down,B.cal,B.nd]));
+  return rows;
+}
+function buildSheetCapLabor(C){
+  const rows=[['Subjefe','Trabajador','Código','Labor','Horas','Mesas','Mesas por hora','Referencia zona (mesas/h)','N° personas en la referencia','Índice %']];
+  C.filas.forEach(x=>Object.entries(x.lab).sort((a,b)=>b[1].h-a[1].h).forEach(([k,L])=>{
+    const R=C.ref[k],li=laborKeyInfo(String(k).startsWith('v1_')?k:Number(k));
+    rows.push([x.w.subjefe,wDisplay(x.w),li.code,li.desc,r2(L.h),L.m,r2(L.m/L.h),r2(R.rate),R.nw,Math.round(L.m/L.h/R.rate*100)]);
+  }));
+  return rows;
+}
+function buildSheetCapCriterios(C,f,rango){
+  return [
+    ['Capacidad de avance y carga — criterios'],[],
+    ['Periodo',`${f.desde} → ${f.hasta}`],['Zona',pD().nombre],['Subjefe',f.subjefe||'Todos'],
+    ['Fuente de registros',rango?'Consulta completa del rango a la base':'⚠️ Últimos 500 registros en memoria (no se pudo consultar el rango): el periodo puede estar incompleto'],
+    ['Líneas de labor con horas y mesas',C.nLineas],['Líneas descartadas por posible error de digitación (ritmo >5× o <0,2× la mediana de la labor)',C.descartadas],
+    ['Labores excluidas por tener menos de '+CAP_MIN_TRAB_LAB+' personas (sin con quién comparar)',C.labNoComp],[],
+    ['Cómo se calcula'],
+    ['1. Ritmo = mesas ÷ horas, comparado con la referencia de la zona en la MISMA labor. Índice 100 = ritmo de referencia; 120 = 20% más rápido.'],
+    ['2. El índice de la persona = mesas hechas ÷ mesas esperadas al ritmo de referencia (pondera solo por horas medibles).'],
+    [`3. Índice ajustado: con pocas horas se acerca a 100 — (horas × índice + ${CAP_K} × 100) ÷ (horas + ${CAP_K}). Evita conclusiones con pocos días.`],
+    ['4. Intervalo 90%: índice ajustado ± 1,645 × desviación de los índices diarios ÷ √días (aproximado; requiere ≥3 días).'],
+    [`5. Confiabilidad: Alta ≥60 h medibles y ≥10 días · Media ≥${CAP_MIN_H} h y ≥${CAP_MIN_DIAS} días · Baja: no se recomienda.`],
+    [`6. Puede aumentar: índice ajustado ≥${CAP_UP} y mínimo del intervalo ≥100. Reducir: índice ajustado ≤${CAP_DOWN} y máximo del intervalo <100. Lo demás: Mantener.`],
+    ['7. Calidad: con ≥3 evaluaciones, si el promedio es >2,2 o ≥30% son "mal", no se recomienda aumentar aunque sea rápido.'],
+    [`8. Plantas sugeridas = plantas actuales × índice ajustado ÷ 100, con cambio máximo ±${CAP_MAXCHG*100}% por ajuste, redondeado a ${CAP_ROUND}.`],[],
+    ['Supuestos y límites (leer antes de decidir)'],
+    ['• Se asume que una mesa tiene trabajo equivalente en todos los sectores. Estado del cultivo, época, variedad o carga de fruta distintos pueden explicar diferencias de ritmo que no son de la persona.'],
+    ['• El índice mide velocidad, no calidad. La calidad solo se considera si se usa el campo Evaluación al registrar.'],
+    ['• Solo entran las horas con mesas registradas; revisar "% horas medibles": si es bajo, el índice representa una parte pequeña del trabajo.'],
+    ['• Las horas de apoyo no se cuentan (la labor queda a nombre del encargado): un encargado con mucho apoyo puede aparecer más rápido.'],
+    ['• El ritmo se calcula sobre horas registradas; no considera horas extra ni si la persona completa o no la pasada de su sector.'],
+    ['• Recomendación orientativa: confirmar con el subjefe antes de mover plantas, y ajustar por pasos.'],
+  ];
+}
+async function capPreparar(){
+  const f=getInfFiltros();if(!f)return null;
+  const msg=document.getElementById('infMsg');msg.textContent='⏳ Leyendo registros del periodo…';
+  const {regs,rango}=await fetchRegsZona(activePred,f);
+  const ws=wsZonaConPrestados();
+  const C=calcCapacidad(regs,ws,f);
+  if(!C.nLineas){msg.textContent='⚠️ No hay labores con horas y mesas registradas en el rango';toast('Sin datos de ritmo');return null}
+  return{f,C,rango,msg};
+}
+async function generarInformeCapacidad(){
+  try{
+    const p=await capPreparar();if(!p)return;const{f,C,rango,msg}=p;
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCapacidad(C)),'Capacidad y carga');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCapLabor(C)),'Ritmo por labor');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCapCriterios(C,f,rango)),'Criterios');
+    const fn=`Arrayanes_Capacidad_carga_${f.desde}_a_${f.hasta}.xlsx`;
+    descargarXLSX(wb,fn);
+    msg.textContent='✅ Descargado: '+fn+(rango?'':' · ⚠️ sin conexión al rango: se usaron los últimos 500 registros');
+  }catch(e){document.getElementById('infMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+const CAP_CHIP={up:['#2D6A4F','#D8F3DC'],down:['#9B2226','#FDE2E1'],ok:['#5A5A5A','#EDEBE6'],cal:['#8A5A00','#FFF1CC'],nd:['#7A7A7A','#F4F2EE']};
+async function generarInformeCapacidadHTML(){
+  try{
+    const p=await capPreparar();if(!p)return;const{f,C,rango,msg}=p;
+    const hj=cfgGlobal.horasJornada||8;
+    const esc=dbEsc;
+    // Escala de barras: 50–150
+    const X=v=>Math.max(0,Math.min(100,(v-50)));
+    const porSub={};C.filas.forEach(x=>(porSub[x.w.subjefe]=porSub[x.w.subjefe]||[]).push(x));
+    const tarjetas=Object.entries(porSub).map(([s,fs])=>{
+      const B=C.bal[s];
+      const filas=fs.map(x=>{
+        const [fg,bg]=CAP_CHIP[x.cod];
+        const barra=x.adj==null?'<div class="nobar">sin horas medibles</div>':
+          `<div class="bar"><div class="mid"></div>${x.lo!=null?`<div class="ci" style="left:${X(x.lo)}%;width:${Math.max(1,X(x.hi)-X(x.lo))}%"></div>`:''}<div class="pt" style="left:${X(x.adj)}%;background:${efColorHex(x.adj)}"></div></div>`;
+        return `<tr>
+          <td><b>${esc(wDisplay(x.w))}</b><div class="sm">${x.P?x.P.toLocaleString('es-CL')+' plantas':'sin plantas en ficha'} · ${r2(x.h)} h medibles (${capPctTxt(x.pctMed)}) · ${x.dias} días</div></td>
+          <td class="c">${x.adj==null?'—':Math.round(x.adj)}<div class="sm">${x.lo!=null?Math.round(x.lo)+'–'+Math.round(x.hi):''}</div></td>
+          <td>${barra}</td>
+          <td class="c">${x.mesasJor?r2(x.mesasJor):'—'}</td>
+          <td class="c">${x.evalAvg==null?'—':r2(x.evalAvg)}${x.nEval?`<div class="sm">${x.nEval} eval.</div>`:''}</td>
+          <td><span class="chip" style="color:${fg};background:${bg}">${esc(x.rec)}</span><div class="sm">Confiabilidad ${x.conf}</div></td>
+          <td class="c">${x.P&&x.delta?`${x.sug.toLocaleString('es-CL')}<div class="sm" style="color:${x.delta>0?'#2D6A4F':'#9B2226'}">${x.delta>0?'+':''}${x.delta.toLocaleString('es-CL')}</div>`:'—'}</td>
+        </tr>`}).join('');
+      return `<div class="card"><h2>👥 ${esc(s)} · ${B.n} encargados · ${B.P.toLocaleString('es-CL')} plantas</h2>
+        <div class="bal"><span>⬆️ Pueden aumentar: <b>${B.up}</b> (absorben ${B.abs.toLocaleString('es-CL')} pl.)</span><span>⬇️ Reducir: <b>${B.down}</b> (liberan ${B.lib.toLocaleString('es-CL')} pl.)</span><span>⚠️ Revisar calidad: <b>${B.cal}</b></span><span>❔ Sin datos: <b>${B.nd}</b></span><span>Saldo: <b>${(B.lib-B.abs).toLocaleString('es-CL')}</b> pl. ${B.lib-B.abs>0?'(sobran plantas por reasignar)':B.lib-B.abs<0?'(faltan plantas para dar a los más rápidos)':''}</span></div>
+        <div class="tw"><table><thead><tr><th>Encargado</th><th>Índice ajustado<div class="sm">interv. 90%</div></th><th>Ritmo vs zona <span class="sm">(50 · 100 · 150)</span></th><th>Mesas / jornada (${hj} h)</th><th>Evaluación<div class="sm">1 muy bien · 3 mal</div></th><th>Recomendación</th><th>Plantas sugeridas</th></tr></thead><tbody>${filas}</tbody></table></div></div>`;
+    }).join('');
+    const html='<!DOCTYPE html>'+`<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Capacidad de avance ${f.desde} a ${f.hasta}</title><style>
+body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#F8F5EF;color:#2A2A2A;margin:0;padding:0 0 40px}
+.hdr{background:#1A2E1F;color:#B7E4C7;padding:22px 18px}.hdr h1{margin:0;font-size:20px}.hdr p{margin:5px 0 0;font-size:12px;color:#74C69D}
+.wrap{max-width:1100px;margin:0 auto;padding:0 14px}
+.card{background:#fff;border-radius:14px;padding:14px;margin:12px 0;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.card h2{font-size:13px;margin:0 0 10px;color:#1A2E1F;text-transform:uppercase;letter-spacing:.5px}
+.bal{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;margin-bottom:10px;color:#444}
+.tw{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:12px;min-width:760px}
+th{text-align:left;font-size:10px;text-transform:uppercase;color:#7A7A7A;border-bottom:2px solid #E9E3D7;padding:6px;vertical-align:bottom}
+td{border-bottom:1px solid #F0EBE1;padding:7px 6px;vertical-align:middle}.c{text-align:center;font-family:Menlo,Consolas,monospace}
+.sm{font-size:10px;color:#7A7A7A;font-weight:400;font-family:-apple-system,'Segoe UI',Roboto,sans-serif}
+.bar{position:relative;height:16px;background:linear-gradient(90deg,#FDE2E1 0 35%,#FFF1CC 35% 50%,#D8F3DC 50% 100%);border-radius:8px;min-width:160px}
+.mid{position:absolute;left:50%;top:-2px;bottom:-2px;width:2px;background:#1A2E1F}
+.ci{position:absolute;top:6px;height:4px;background:rgba(26,46,31,.35);border-radius:2px}
+.pt{position:absolute;top:2px;width:12px;height:12px;border-radius:50%;margin-left:-6px;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+.nobar{font-size:10px;color:#7A7A7A}.chip{display:inline-block;border-radius:10px;padding:3px 8px;font-size:11px;font-weight:600}
+.note{font-size:12px;line-height:1.55;color:#444}.note li{margin-bottom:4px}
+.warn{background:#FFF8E6;border-left:3px solid #D4A017;border-radius:6px;padding:8px 10px;font-size:12px;margin-top:12px}
+</style></head><body>
+<div class="hdr"><h1>📐 Capacidad de avance y carga de plantas</h1>
+<p>${esc(pD().nombre)} · ${fD(f.desde)} → ${fD(f.hasta)}${f.subjefe?' · Subjefe: '+esc(f.subjefe):''} · Generado ${new Date().toLocaleString('es-CL')}</p></div>
+<div class="wrap">
+${rango?'':'<div class="warn">⚠️ No se pudo consultar el rango completo: se usaron los últimos 500 registros en memoria. El periodo puede estar incompleto.</div>'}
+<div class="card"><h2>Cómo leer este informe</h2><ul class="note">
+<li><b>Índice de ritmo</b>: mesas por hora de la persona comparadas con la referencia de la zona <b>en la misma labor</b>. 100 = ritmo de referencia; 120 = 20% más rápido; 80 = 20% más lento.</li>
+<li>El índice se <b>ajusta hacia 100</b> cuando hay pocas horas registradas, y la línea gris muestra el <b>intervalo 90%</b> según la variación día a día. Solo se recomienda cambiar carga si todo el intervalo queda a un lado de 100.</li>
+<li><b>Puede aumentar</b>: índice ≥${CAP_UP} y ritmo sostenido. <b>Reducir</b>: índice ≤${CAP_DOWN} y sostenido. Si la evaluación de calidad es mala, no se sugiere aumentar.</li>
+<li><b>Plantas sugeridas</b>: plantas actuales × índice ÷ 100, con cambio máximo de ±${CAP_MAXCHG*100}% por ajuste y redondeado a ${CAP_ROUND}. El <b>saldo</b> por subjefe indica si las plantas liberadas alcanzan para lo que pueden absorber los más rápidos.</li>
+</ul>
+<div class="warn"><b>Límites:</b> se asume que una mesa tiene trabajo equivalente en todos los sectores; diferencias de estado del cultivo, época, variedad o carga de fruta pueden explicar parte del ritmo. Solo cuentan las horas con mesas registradas (ver % de horas medibles) y no se cuentan las horas de apoyo. Es una guía: confirmar con el subjefe antes de mover plantas.
+${C.descartadas?`<br>Se descartaron ${C.descartadas} línea(s) con ritmo anómalo (posible error de digitación).`:''}${C.labNoComp?`<br>${C.labNoComp} labor(es) no se usaron por tener menos de ${CAP_MIN_TRAB_LAB} personas para comparar.`:''}</div></div>
+${tarjetas||'<div class="card">Sin encargados para el filtro elegido.</div>'}
+</div></body></html>`;
+    const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download=`Arrayanes_Capacidad_carga_${f.desde}_a_${f.hasta}.html`;
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    msg.textContent=`✅ Descargado: ${a.download}`+(rango?'':' · ⚠️ se usaron los últimos 500 registros');
+  }catch(e){document.getElementById('infMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+
 // ── OBSERVACIONES ──
 function buildSheetObs(regs,ws){
   const rows=[['Fecha','Trabajador','Subjefe','Labores / situación','Observación','N° fotos']];
@@ -3860,6 +4080,7 @@ async function generarInformeCompleto(){
       ['10. Observaciones del periodo (texto; las fotos van en el informe HTML de observaciones)'],
       ['11. Zonas: superficie (ha) vs personal, jornadas y costo — 3 zonas'],
       ['12. Costo % por labor en cada zona — 3 zonas'],
+      ['13. Capacidad de avance y carga: ritmo por trabajador vs zona, recomendación y plantas sugeridas (+ criterios)'],
       [],
       ['Costo jornada hombre (CLP)',cfgGlobal.costoJornada||'(no configurado)'],
       ['Horas por jornada',cfgGlobal.horasJornada||8],
@@ -3882,6 +4103,10 @@ async function generarInformeCompleto(){
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetObs(regs,ws)),'Observaciones');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetZonas(statsZonas(rz))),'Zonas ha y personal');
     XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetLaborZonas(rz)),'Costo % labor por zona');
+    const capC=calcCapacidad(rz[activePred]||[],ws,f);
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCapacidad(capC)),'Capacidad y carga');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCapLabor(capC)),'Ritmo por labor');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetCapCriterios(capC,f,true)),'Criterios capacidad');
     const filename=`Arrayanes_Informe_${f.desde}_a_${f.hasta}.xlsx`;
     descargarXLSX(wb,filename);
     msg.textContent='✅ Descargado: '+filename;
