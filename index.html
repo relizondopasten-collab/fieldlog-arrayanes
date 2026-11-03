@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-10-20-1';
+const APP_V = '2026-11-03-1';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -509,6 +509,9 @@ select:focus,input:focus{border-color:var(--green)}
         <button class="btn btn-secondary" onclick="generarInforme('eficiencia')" style="font-size:11px;padding:8px;grid-column:span 2">⚡ Eficiencia: mesas/hora por labor y por trabajador</button>
         <button class="btn btn-secondary" onclick="generarInformeCapacidad()" style="font-size:11px;padding:8px">📐 Capacidad y carga (Excel)</button>
         <button class="btn btn-secondary" onclick="generarInformeCapacidadHTML()" style="font-size:11px;padding:8px">📐 Capacidad y carga (HTML)</button>
+        <button class="btn btn-secondary" onclick="generarInformeAvanceHTML()" style="font-size:11px;padding:8px;grid-column:span 2;border-color:var(--green)">🎯 Avance semanal por encargado vs programación (HTML)</button>
+        <button class="btn btn-secondary" onclick="generarInformeAvance()" style="font-size:11px;padding:8px;grid-column:span 2">🎯 Avance semanal por encargado (Excel)</button>
+        <div style="grid-column:span 2;font-size:10px;color:var(--muted);line-height:1.4;margin:-2px 0 4px">Avance semanal: usa la semana MIÉ→MAR que contiene la fecha <b>Hasta</b> (corte) y las 3 zonas, o solo el subjefe elegido.</div>
         <button class="btn btn-secondary" onclick="generarInforme('ausencias')" style="font-size:11px;padding:8px;grid-column:span 2">🏥 Ausencias, licencias y vacaciones</button>
         <button class="btn btn-secondary" onclick="generarInforme('zonas')" style="font-size:11px;padding:8px;grid-column:span 2">🗺 Zonas: ha vs personal y costo % por labor</button>
       </div>
@@ -609,6 +612,8 @@ select:focus,input:focus{border-color:var(--green)}
         <div><label>Costo jornada (CLP)</label><input type="number" id="cfgCostoJornada" placeholder="Ej: 25000" min="0"></div>
         <div><label>Horas por jornada</label><input type="number" id="cfgHorasJornada" placeholder="8" min="1" step="0.5"></div>
       </div>
+      <div class="form-row"><label>Plantas por mesa (promedio)</label><input type="number" id="cfgPlantasMesa" placeholder="145" min="1"></div>
+      <p style="font-size:11px;color:var(--muted);margin:-4px 0 10px;line-height:1.5">Convierte las plantas de cada encargado en mesas asignadas (informe de avance semanal).</p>
       <button class="btn btn-primary" onclick="saveCfgCosto()">Guardar parámetros</button>
       <div class="sec-div">Superficie por zona (ha)</div>
       <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Se usa en los informes para comparar personal, jornadas y costo por hectárea entre zonas. En Zona 3 se separa por época (primor / verano) según el ciclo del registro.</p>
@@ -1098,6 +1103,7 @@ async function loadCfgGlobal(){
     const ci=document.getElementById('cfgCostoJornada'),hi=document.getElementById('cfgHorasJornada');
     if(ci&&!ci.value&&cfgGlobal.costoJornada)ci.value=cfgGlobal.costoJornada;
     if(hi&&!hi.value)hi.value=cfgGlobal.horasJornada;
+    const pm=document.getElementById('cfgPlantasMesa');if(pm&&!pm.value)pm.value=plantasPorMesa();
     fillSupInputs();
   }catch(e){console.error('cfg',e)}
 }
@@ -1131,10 +1137,12 @@ async function saveCfgCosto(){
   const costo=parseFloat(document.getElementById('cfgCostoJornada').value)||0;
   const horas=parseFloat(document.getElementById('cfgHorasJornada').value)||8;
   if(horas<=0){toast('⚠️ Horas por jornada debe ser mayor a 0');return}
+  const pmEl=document.getElementById('cfgPlantasMesa');const plantasMesa=pmEl?(parseFloat(pmEl.value)||PLANTAS_MESA_DEF):plantasPorMesa();
+  if(plantasMesa<=0){toast('⚠️ Plantas por mesa debe ser mayor a 0');return}
   loading(true,'Guardando…');
   try{
-    await db.collection('arr_config').doc('global').set({costoJornada:costo,horasJornada:horas},{merge:true});
-    cfgGlobal={...cfgGlobal,costoJornada:costo,horasJornada:horas};
+    await db.collection('arr_config').doc('global').set({costoJornada:costo,horasJornada:horas,plantasMesa},{merge:true});
+    cfgGlobal={...cfgGlobal,costoJornada:costo,horasJornada:horas,plantasMesa};
     toast('✅ Parámetros guardados');
   }catch(e){toast('Error: '+e.message)}
   loading(false);
@@ -2700,7 +2708,7 @@ async function renderConfig(){
   const wOrden=[...sortWs(wActivos(wMap[activePred])),...sortWs((wMap[activePred]||[]).filter(w=>!esActivo(w)))];
   document.getElementById('wList').innerHTML=wOrden.length
     ?wOrden.map(w=>{const inact=!esActivo(w);return `<div class="wrow" style="${inact?'opacity:.5':''}">
-        <div><div class="wn">${wDisplay(w)}${inact?' <span class="role-badge" style="background:var(--sand);color:var(--muted)">Inactivo</span>':''}</div><div class="wm">${w.codigo||'—'} · ${w.subjefe}${w.plantas?` · ${w.plantas}pl`:''}${w.consolidadoEn?` · 🔗 unido a ${(()=>{const k=wById(w.consolidadoEn,w.consolidadoZona);return k?wDisplay(k):'otro'})()}`:''}</div></div>
+        <div><div class="wn">${wDisplay(w)}${inact?' <span class="role-badge" style="background:var(--sand);color:var(--muted)">Inactivo</span>':''}</div><div class="wm">${w.codigo||'—'} · ${w.subjefe}${w.plantas?` · ${w.plantas}pl ≈${mesasAsignadas(w)} mesas`:''}${w.consolidadoEn?` · 🔗 unido a ${(()=>{const k=wById(w.consolidadoEn,w.consolidadoZona);return k?wDisplay(k):'otro'})()}`:''}</div></div>
         <div style="display:flex;gap:4px;flex-shrink:0">
           <button class="btn ${inact?'btn-primary':'btn-warn'} btn-sm" onclick="toggleActivoW('${w.id}')" title="${inact?'Reactivar':'Dejar inactivo'}">${inact?'▶':'⏸'}</button><button class="btn btn-secondary btn-sm" onclick="modalEditarW('${w.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="delW('${w.id}')">✕</button>
         </div>
@@ -3070,7 +3078,7 @@ function modalEditarW(id){
       <div><label>Código rango</label><input type="text" id="ewC" value="${(w.codigo||'').replace(/"/g,'&quot;')}"></div>
       <div><label>Subjefe</label><select id="ewS">${pD().subjefes.map(x=>`<option${w.subjefe===x?' selected':''}>${x}</option>`).join('')}</select></div>
     </div>
-    <div class="form-row"><label>N° plantas</label><input type="number" id="ewP" min="0" value="${w.plantas||''}"></div>
+    <div class="form-row"><label>N° plantas <span style="font-weight:400;color:var(--muted)" id="ewPM">${w.plantas?'≈ '+mesasAsignadas(w)+' mesas':''}</span></label><input type="number" id="ewP" min="0" value="${w.plantas||''}" oninput="document.getElementById('ewPM').textContent=+this.value>0?'≈ '+Math.round(this.value/plantasPorMesa())+' mesas':''"></div>
     <button class="btn btn-primary" onclick="guardarEdicionW('${id}')">Guardar cambios</button>`;
   document.getElementById('overlay').classList.add('open');
 }
@@ -3965,6 +3973,252 @@ body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#F8F5EF;c
     setTimeout(()=>URL.revokeObjectURL(a.href),4000);
     msg.textContent=`✅ Descargado: Arrayanes_Observaciones_${f.desde}_a_${f.hasta}.html · ${regs.length} observación(es), ${nFotosTot} foto(s)${nFotosTot?' — incluye las fotos, puede pesar varios MB':''}`;
   }catch(e){msg.textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+
+// ══════════════════════════════════════════════
+// AVANCE SEMANAL POR TRABAJADOR vs PROGRAMACIÓN (2026-11-03)
+// ══════════════════════════════════════════════
+// Pedido: que gerencia vea, en cualquier día de la semana, el % de avance de cada encargado según lo
+// programado. Mesas asignadas = plantas de la ficha ÷ plantas por mesa (145 por defecto, editable en Config).
+// Supuesto: cada labor programada en la semana (MIÉ→MAR) es UNA pasada por todas las mesas del encargado.
+// Avance de la labor = mesas registradas por el encargado en esa labor desde el miércoles hasta la fecha de corte
+// ÷ sus mesas asignadas. Esperado a la fecha = días programados ya transcurridos ÷ días programados de la labor.
+const PLANTAS_MESA_DEF=145,AV_TOL=10,AV_LOOKBACK_DIAS=42;
+function plantasPorMesa(){const v=+cfgGlobal.plantasMesa;return v>0?v:PLANTAS_MESA_DEF}
+function mesasAsignadas(w){const p=+((w&&w.plantas)||0);return p>0?Math.round(p/plantasPorMesa()):0}
+function avIsoMas(iso,n){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)}
+function avKey(id){return String(id)}
+async function avRegsZona(pid,desde,hasta){
+  try{
+    const s=await colRegistros(pid).where('fecha','>=',desde).where('fecha','<=',hasta).get();
+    return {regs:s.docs.map(d=>({id:d.id,...d.data()})),ok:true};
+  }catch(e){
+    // sin conexión: solo hay caché (últimos 500) de la zona activa
+    return {regs:pid===activePred?rCache.filter(r=>r.fecha>=desde&&r.fecha<=hasta):[],ok:false};
+  }
+}
+// Programación de la semana; si está vacía, la hecha el martes anterior sobre la semana que terminaba (igual que la pantalla)
+async function avLeerProg(pid,sub,wed){
+  try{
+    const s=await colProg(pid,sub).doc(wed).get();
+    const x=s.exists?s.data():null;
+    const n=(x&&!x.movidoA)?Object.values(x.dias||{}).reduce((a,v)=>a+((v||[]).length),0):0;
+    if(n)return {dias:x.dias,lv:recLV(x),origen:'semana'};
+    const prev=await progPrevParaEstaSemana(pid,sub,wed);
+    if(prev)return {dias:progRemapDias(prev.data.dias,prev.prevIso,wed),lv:recLV(prev.data),origen:'martes',prevIso:prev.prevIso};
+    return null;
+  }catch(e){return {error:e.message}}
+}
+// Labores de la programación agrupadas (una labor puede repartirse en varios días)
+function avLaboresProg(prog,dias){
+  const L={};
+  dias.forEach(iso=>((prog.dias||{})[iso]||[]).forEach(t=>{
+    if(t.laborId==null||t.laborId==='')return;
+    const nid=normLaborId(+t.laborId,prog.lv||1),k=avKey(nid);
+    const info=laborInfo(+t.laborId,prog.lv||1);
+    if(!L[k])L[k]={k,nid,cod:t.laborId,desc:info?info.d:'(labor '+t.laborId+')',dias:[],posturas:new Set(),meta:0};
+    if(!L[k].dias.includes(iso))L[k].dias.push(iso);
+    if(t.postura)L[k].posturas.add(t.postura);
+    L[k].meta+=+t.metaMesas||0;
+  }));
+  return Object.values(L).sort((a,b)=>a.dias[0].localeCompare(b.dias[0])||String(a.cod).localeCompare(String(b.cod),'es',{numeric:true}));
+}
+// ¿La labor se registra en mesas? Se mira la zona en las últimas semanas: si hubo horas pero nunca mesas,
+// no se mide avance (ej. aplicaciones). Si nunca se ha registrado, se mide (queda como pendiente).
+function avMedibles(regsHist){
+  const H={};
+  regsHist.forEach(r=>{if(r.ausente)return;const lv=recLV(r);(r.labores||[]).forEach(l=>{
+    const k=avKey(normLaborId(l.laborId,lv));H[k]=H[k]||{h:0,m:0};H[k].h+=+l.horas||0;H[k].m+=+l.mesas||0;})});
+  return k=>!(H[k]&&H[k].h>0&&!(H[k].m>0));
+}
+// regsPorZona: {z:[registros desde (miércoles − lookback) hasta corte]}
+function calcAvanceSemanal(regsPorZona,progs,wed,corte){
+  const dias=getProgDays(wed);
+  const out=[];
+  progs.forEach(P=>{
+    const z=P.z,regsZ=regsPorZona[z]||[];
+    const semana=regsZ.filter(r=>r.fecha>=wed&&r.fecha<=corte);
+    const medible=avMedibles(regsZ);
+    const labs=P.prog?avLaboresProg(P.prog,dias):[];
+    const activas=labs.filter(l=>l.dias.some(d=>d<=corte));
+    const proximas=labs.filter(l=>!l.dias.some(d=>d<=corte));
+    const med=activas.filter(l=>medible(l.k)),noMed=activas.filter(l=>!medible(l.k));
+    med.forEach(l=>{const tot=l.dias.length,ya=l.dias.filter(d=>d<=corte).length;l.esp=tot?ya/tot:1;l.diasYa=ya});
+    // Encargados propios activos del subjefe (de cualquier colección)
+    const ws=sortWs(wTodos().filter(w=>esActivo(w)&&!w.consolidadoEn&&nSub(w.subjefe)===nSub(P.sub)));
+    const filas=ws.map(w=>{
+      const M=mesasAsignadas(w);
+      const propios=semana.filter(r=>r.workerId===w.id);
+      const aus=propios.filter(r=>r.ausente);
+      const reemp=aus.filter(r=>r.reemplazoWorkerId&&r.reemplazoWorkerId!=='sin').length;
+      // días trabajando prestado en otra zona (sus mesas allá no son las suyas)
+      let prest=0;Object.entries(regsPorZona).forEach(([oz,rs])=>{if(oz===z)return;prest+=rs.filter(r=>r.fecha>=wed&&r.fecha<=corte&&r.workerId===w.id&&!r.ausente).length});
+      const porLab=med.map(l=>{
+        const real=propios.filter(r=>!r.ausente).reduce((s,r)=>{const lv=recLV(r);return s+(r.labores||[]).filter(x=>avKey(normLaborId(x.laborId,lv))===l.k).reduce((ss,x)=>ss+(+x.mesas||0),0)},0);
+        return {l,real,pct:M?real/M*100:null,esp:l.esp*100};
+      });
+      const base=M*med.length;
+      const logro=porLab.reduce((s,x)=>s+Math.min(x.real,M),0);
+      const esper=porLab.reduce((s,x)=>s+M*x.l.esp,0);
+      const pct=base?logro/base*100:null,esp=base?esper/base*100:null;
+      let estado,cod;
+      if(!M){estado='Sin plantas en ficha';cod='nd'}
+      else if(!med.length){estado='Sin labores medibles a la fecha';cod='nd'}
+      else if(pct>=99.5){estado='Completo';cod='ok'}
+      else if(pct>=esp-AV_TOL){estado='Al día';cod='ok'}
+      else{estado='Atrasado';cod='down'}
+      return {w,M,porLab,pct,esp,logro,base,aus:aus.length,reemp,prest,estado,cod};
+    });
+    const sM=filas.reduce((s,x)=>s+x.M,0);
+    const tB=filas.reduce((s,x)=>s+x.base,0),tL=filas.reduce((s,x)=>s+x.logro,0),tE=filas.reduce((s,x)=>s+(x.base?x.esp/100*x.base:0),0);
+    out.push({z,sub:P.sub,prog:P.prog,err:P.err,labs,med,noMed,proximas,filas,sM,
+      pct:tB?tL/tB*100:null,esp:tB?tE/tB*100:null,
+      nAtr:filas.filter(x=>x.cod==='down').length,nSinPl:filas.filter(x=>!x.M).length});
+  });
+  return out;
+}
+async function avPreparar(){
+  const hasta=document.getElementById('infHasta').value;
+  if(!hasta){toast('⚠️ Selecciona la fecha Hasta (fecha de corte)');return null}
+  const corte=hasta>todayIso?todayIso:hasta;
+  const wed=progMiercolesDe(corte);
+  const subF=document.getElementById('infSubjefe').value;
+  const zonas=subF?[activePred]:PRED_ORDER;
+  const msg=document.getElementById('infMsg');msg.textContent='⏳ Leyendo programación y registros de la semana…';
+  const desdeHist=avIsoMas(wed,-AV_LOOKBACK_DIAS);
+  const regsPorZona={},sinRango=[];
+  for(const z of zonas){const r=await avRegsZona(z,desdeHist,corte);regsPorZona[z]=r.regs;if(!r.ok)sinRango.push(PREDIOS[z].nombre)}
+  // para contar días prestado se leen también las otras zonas (solo la semana) si se filtró por subjefe
+  if(subF)for(const z of PRED_ORDER.filter(x=>!zonas.includes(x))){const r=await avRegsZona(z,wed,corte);regsPorZona[z]=r.regs}
+  const progs=[];
+  for(const z of zonas){
+    const subs=subF?[subF]:PREDIOS[z].subjefes;
+    for(const sub of subs){const p=await avLeerProg(z,sub,wed);progs.push({z,sub,prog:p&&!p.error?p:null,err:p&&p.error})}
+  }
+  const A=calcAvanceSemanal(regsPorZona,progs,wed,corte);
+  return {A,wed,corte,dias:getProgDays(wed),sinRango,msg,hastaPedido:hasta};
+}
+function avFmt(p){return p==null?'—':Math.round(p)+'%'}
+function buildSheetAvance(R){
+  const rows=[['Zona','Subjefe','Encargado','Plantas','Mesas asignadas','Labor (cód.)','Labor','Días programados','Mesas realizadas','% avance','% esperado a la fecha','Estado','Días ausente','Días prestado a otra zona']];
+  R.A.forEach(G=>G.filas.forEach(x=>{
+    x.porLab.forEach(p=>rows.push([PREDIOS[G.z].nombre,G.sub,wDisplay(x.w),+x.w.plantas||0,x.M,p.l.cod,p.l.desc,p.l.dias.map(fDMY).join(' · '),p.real,p.pct==null?'':Math.round(p.pct),Math.round(p.esp),'',x.aus,x.prest]));
+    rows.push([PREDIOS[G.z].nombre,G.sub,wDisplay(x.w),+x.w.plantas||0,x.M,'TOTAL','Todas las labores medibles programadas a la fecha','',x.porLab.reduce((s,p)=>s+p.real,0),x.pct==null?'':Math.round(x.pct),x.esp==null?'':Math.round(x.esp),x.estado,x.aus,x.prest]);
+  }));
+  return rows;
+}
+function buildSheetAvanceResumen(R){
+  const rows=[['Zona','Subjefe','Encargado','Plantas','Mesas asignadas','Labores medibles a la fecha','% avance semana','% esperado a la fecha','Estado','Días ausente','Días reemplazado','Días prestado']];
+  R.A.forEach(G=>G.filas.forEach(x=>rows.push([PREDIOS[G.z].nombre,G.sub,wDisplay(x.w),+x.w.plantas||0,x.M,G.med.length,x.pct==null?'':Math.round(x.pct),x.esp==null?'':Math.round(x.esp),x.estado,x.aus,x.reemp,x.prest])));
+  return rows;
+}
+function buildSheetAvanceCriterios(R){
+  const ppm=plantasPorMesa();
+  const rows=[['Avance semanal por encargado vs programación — criterios'],[],
+    ['Semana de programación',fDMY(R.wed)+' (miércoles) → '+fDMY(R.dias[4])+' (martes)'],
+    ['Fecha de corte',fDMY(R.corte)+(R.hastaPedido>R.corte?' (se usó hoy: la fecha Hasta es futura)':'')],
+    ['Plantas por mesa (promedio)',ppm],[],
+    ['1. Mesas asignadas = plantas de la ficha del encargado ÷ '+ppm+', redondeado. Es un promedio: si los invernaderos tienen mesas de distinto largo, el número real puede variar.'],
+    ['2. Cada labor programada en la semana se toma como UNA pasada por todas las mesas del encargado (también si la tarea indica postura).'],
+    ['3. % avance de la labor = mesas registradas por el encargado en esa labor, del miércoles a la fecha de corte ÷ sus mesas asignadas.'],
+    ['4. % esperado a la fecha = días programados de la labor ya transcurridos ÷ días programados de la labor. Labores programadas solo para días posteriores al corte no se cuentan.'],
+    ['5. % avance de la semana = Σ mín(mesas realizadas, mesas asignadas) ÷ (mesas asignadas × n.º de labores). Pasarse de 100% en una labor no compensa otra.'],
+    ['6. Estado: Completo (≥100%) · Al día (no más de '+AV_TOL+' puntos bajo lo esperado) · Atrasado.'],
+    ['7. No se mide avance en labores que en las últimas '+Math.round(AV_LOOKBACK_DIAS/7)+' semanas se registraron con horas pero sin mesas (ej. aplicaciones).'],
+    ['8. Solo cuentan los registros en la zona del encargado. Días prestado a otra zona y días ausente bajan su avance; si tuvo reemplazo, las mesas de esos días quedan a nombre del reemplazante.'],
+    ['9. Si la semana no tiene programación propia, se usa la hecha el martes anterior sobre la semana que terminaba (igual que en la pantalla Programación).'],
+    ['10. Mesas registradas con persona de apoyo cuentan completas al encargado (así se registran).']];
+  if(R.sinRango.length)rows.push([],['⚠️ Sin conexión para leer el rango completo de: '+R.sinRango.join(', ')+'. Los datos pueden estar incompletos.']);
+  return rows;
+}
+async function generarInformeAvance(){
+  try{
+    const R=await avPreparar();if(!R)return;
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetAvanceResumen(R)),'Avance por encargado');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetAvance(R)),'Avance por labor');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetAvanceCriterios(R)),'Criterios avance');
+    const fn=`Arrayanes_Avance_semana_${R.wed}_corte_${R.corte}.xlsx`;
+    descargarXLSX(wb,fn);
+    R.msg.textContent='✅ Descargado: '+fn+(R.sinRango.length?' · ⚠️ sin conexión: datos incompletos de '+R.sinRango.join(', '):'');
+  }catch(e){document.getElementById('infMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+const AV_CHIP={ok:['#2D6A4F','#D8F3DC'],down:['#9B2226','#FDE2E1'],nd:['#7A7A7A','#F4F2EE']};
+function avColor(p,e){if(p==null)return '#9A9A9A';if(p>=99.5)return '#2D6A4F';if(e==null||p>=e-AV_TOL)return '#52B788';if(p>=e-25)return '#E09F3E';return '#C0392B'}
+async function generarInformeAvanceHTML(){
+  try{
+    const R=await avPreparar();if(!R)return;
+    const html=buildAvanceHTML(R);
+    const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    const fn=`Arrayanes_Avance_semana_${R.wed}_corte_${R.corte}.html`;a.download=fn;
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    R.msg.textContent='✅ Descargado: '+fn+(R.sinRango.length?' · ⚠️ sin conexión: datos incompletos de '+R.sinRango.join(', '):'');
+  }catch(e){document.getElementById('infMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+function buildAvanceHTML(R){
+  const esc=dbEsc,ppm=plantasPorMesa();
+  const bar=(p,e)=>`<div class="bar"><div class="fill" style="width:${Math.min(100,Math.max(0,p||0))}%;background:${avColor(p,e)}"></div>${e!=null&&e<100?`<div class="exp" style="left:${e}%" title="Esperado a la fecha"></div>`:''}</div>`;
+  const tot={M:0,B:0,L:0,E:0,atr:0,n:0};
+  const cards=R.A.map(G=>{
+    G.filas.forEach(x=>{tot.n++;tot.M+=x.M;if(x.cod==='down')tot.atr++;if(x.base){tot.B+=x.base;tot.L+=x.logro;tot.E+=x.esp/100*x.base}});
+    const zn=PREDIOS[G.z].nombre;
+    if(G.err)return `<div class="card"><h2>${esc(zn)} · ${esc(G.sub)}</h2><div class="warn">No se pudo leer la programación: ${esc(G.err)}</div></div>`;
+    if(!G.prog)return `<div class="card"><h2>${esc(zn)} · ${esc(G.sub)} · ${G.filas.length} encargados · ≈${G.sM.toLocaleString('es-CL')} mesas</h2><div class="warn">Sin programación para la semana del ${fDMY(R.wed)}: no hay contra qué comparar.</div></div>`;
+    const labTxt=G.labs.map(l=>{
+      const ya=l.dias.some(d=>d<=R.corte),m=G.med.includes(l);
+      return `<span class="lab ${!ya?'fut':!m?'nomed':''}"><b>${esc(l.cod)}.</b> ${esc(l.desc)} <span class="sm">${l.dias.map(d=>progDayName(R.wed,d).slice(0,3)).join('·')}${l.posturas.size?' · P'+[...l.posturas].join(',P'):''}${l.meta?' · meta equipo '+l.meta:''}${!ya?' · aún no':!m?' · no se mide en mesas':''}</span></span>`}).join('');
+    const ths=G.med.map(l=>`<th class="c">${esc(l.cod)}<div class="sm">${esc(l.desc.length>22?l.desc.slice(0,21)+'…':l.desc)}</div><div class="sm">esperado ${Math.round(l.esp*100)}%</div></th>`).join('');
+    const filas=G.filas.map(x=>{
+      const [fg,bg]=AV_CHIP[x.cod];
+      const notas=[x.aus?`${x.aus} día(s) ausente${x.reemp?` (${x.reemp} con reemplazo)`:''}`:'',x.prest?`${x.prest} día(s) prestado a otra zona`:''].filter(Boolean).join(' · ');
+      const celdas=x.porLab.map(p=>`<td class="c" style="color:${avColor(p.pct,p.esp)}">${x.M?Math.round(p.pct)+'%':'—'}<div class="sm">${p.real}/${x.M||'?'}</div></td>`).join('');
+      return `<tr><td><b>${esc(wDisplay(x.w))}</b><div class="sm">${x.w.plantas?(+x.w.plantas).toLocaleString('es-CL')+' pl. → ≈'+x.M+' mesas':'sin plantas en ficha'}${notas?' · '+notas:''}</div></td>
+        <td class="c big" style="color:${avColor(x.pct,x.esp)}">${avFmt(x.pct)}<div class="sm">esperado ${avFmt(x.esp)}</div></td>
+        <td>${x.pct==null?'<div class="sm">—</div>':bar(x.pct,x.esp)}</td>
+        <td><span class="chip" style="color:${fg};background:${bg}">${esc(x.estado)}</span></td>${celdas}</tr>`}).join('');
+    return `<div class="card"><h2>${esc(zn)} · ${esc(G.sub)} · ${G.filas.length} encargados · ≈${G.sM.toLocaleString('es-CL')} mesas</h2>
+      <div class="kpis"><span>Avance del equipo: <b style="color:${avColor(G.pct,G.esp)}">${avFmt(G.pct)}</b> (esperado ${avFmt(G.esp)})</span><span>Atrasados: <b>${G.nAtr}</b></span>${G.nSinPl?`<span>Sin plantas en ficha: <b>${G.nSinPl}</b></span>`:''}</div>
+      ${G.prog.origen==='martes'?`<div class="info">Programación hecha el martes ${fDMY(getProgDays(G.prog.prevIso)[4])} (aún no traída a esta semana en la app).</div>`:''}
+      <div class="labs">${labTxt||'<span class="sm">Programación sin labores</span>'}</div>
+      ${G.med.length?`<div class="tw"><table><thead><tr><th>Encargado</th><th class="c">Avance semana</th><th>Avance <span class="sm">(línea = esperado a la fecha)</span></th><th>Estado</th>${ths}</tr></thead><tbody>${filas}</tbody></table></div>`:'<div class="sm">Ninguna labor medible en mesas programada hasta la fecha de corte.</div>'}</div>`;
+  }).join('');
+  const pT=tot.B?tot.L/tot.B*100:null,eT=tot.B?tot.E/tot.B*100:null;
+  return '<!DOCTYPE html>'+`<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Avance semanal ${R.wed} corte ${R.corte}</title><style>
+body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#F8F5EF;color:#2A2A2A;margin:0;padding:0 0 40px}
+.hdr{background:#1A2E1F;color:#B7E4C7;padding:22px 18px}.hdr h1{margin:0;font-size:20px}.hdr p{margin:5px 0 0;font-size:12px;color:#74C69D}
+.wrap{max-width:1200px;margin:0 auto;padding:0 14px}
+.card{background:#fff;border-radius:14px;padding:14px;margin:12px 0;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.card h2{font-size:13px;margin:0 0 10px;color:#1A2E1F;text-transform:uppercase;letter-spacing:.5px}
+.kpis{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;margin-bottom:8px}
+.labs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}.lab{background:#EEF6F0;border-radius:8px;padding:4px 8px;font-size:11px}
+.lab.fut{background:#F4F2EE;color:#7A7A7A}.lab.nomed{background:#FFF8E6;color:#8A5A00}
+.tw{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:12px;min-width:640px}
+th{text-align:left;font-size:10px;text-transform:uppercase;color:#7A7A7A;border-bottom:2px solid #E9E3D7;padding:6px;vertical-align:bottom}
+td{border-bottom:1px solid #F0EBE1;padding:7px 6px;vertical-align:middle}.c{text-align:center;font-family:Menlo,Consolas,monospace}.big{font-size:15px;font-weight:700}
+.sm{font-size:10px;color:#7A7A7A;font-weight:400;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;text-transform:none}
+.bar{position:relative;height:14px;background:#EDEBE6;border-radius:7px;min-width:130px;overflow:visible}.fill{height:100%;border-radius:7px}
+.exp{position:absolute;top:-3px;bottom:-3px;width:2px;background:#1A2E1F}
+.chip{display:inline-block;border-radius:10px;padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap}
+.note{font-size:12px;line-height:1.55;color:#444}.note li{margin-bottom:4px}
+.warn{background:#FFF8E6;border-left:3px solid #D4A017;border-radius:6px;padding:8px 10px;font-size:12px;margin:6px 0}
+.info{background:#EAF4FB;border-left:3px solid #0369A1;border-radius:6px;padding:6px 10px;font-size:12px;margin:6px 0}
+.tot{font-size:14px}
+</style></head><body>
+<div class="hdr"><h1>🎯 Avance semanal por encargado vs programación</h1>
+<p>Semana ${fDMY(R.wed)} (mié) → ${fDMY(R.dias[4])} (mar) · Corte: ${fD(R.corte)}${R.hastaPedido>R.corte?' (hoy)':''} · ${ppm} plantas por mesa · Generado ${new Date().toLocaleString('es-CL')}</p></div>
+<div class="wrap">
+${R.sinRango.length?`<div class="warn">⚠️ Sin conexión para leer la semana completa de: ${esc(R.sinRango.join(', '))}. Datos incompletos.</div>`:''}
+<div class="card tot"><h2>Resumen</h2><div class="kpis"><span>Encargados: <b>${tot.n}</b></span><span>Mesas asignadas: <b>≈${tot.M.toLocaleString('es-CL')}</b></span><span>Avance total: <b style="color:${avColor(pT,eT)}">${avFmt(pT)}</b> (esperado ${avFmt(eT)})</span><span>Atrasados: <b>${tot.atr}</b></span></div></div>
+${cards}
+<div class="card"><h2>Cómo se calcula</h2><ul class="note">
+<li><b>Mesas asignadas</b> = plantas de la ficha ÷ ${ppm} (promedio). Si el largo de las mesas varía entre invernaderos, el número real puede ser distinto.</li>
+<li>Cada labor programada en la semana se toma como <b>una pasada por todas las mesas</b> del encargado. <b>% avance</b> = mesas registradas en esa labor desde el miércoles hasta el corte ÷ mesas asignadas.</li>
+<li><b>Esperado a la fecha</b> = días programados de la labor ya transcurridos ÷ días programados. Las labores programadas para después del corte no se cuentan todavía.</li>
+<li><b>Avance de la semana</b> = suma de mesas hechas (máx. 100% por labor) ÷ (mesas asignadas × labores). <b>Al día</b>: no más de ${AV_TOL} puntos bajo lo esperado.</li>
+<li>No se mide en mesas una labor que en las últimas ${Math.round(AV_LOOKBACK_DIAS/7)} semanas se registró con horas pero sin mesas (ej. aplicaciones). Días ausente o prestado a otra zona bajan el avance; si hubo reemplazo, esas mesas quedan a nombre del reemplazante.</li>
+</ul></div></div></body></html>`;
 }
 
 function aoaToSheet(rows){
