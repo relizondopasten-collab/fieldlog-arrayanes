@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-11-03-1';
+const APP_V = '2026-11-10-2';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -1218,6 +1218,10 @@ async function loadPredioData(pid){
             ciclosCache[key]=snap.docs.map(d=>({id:d.id,...d.data()}));
             renderCtx();
             if(document.getElementById('screen-ciclos').classList.contains('active'))renderCiclos();
+            if(cpid===activePred&&document.getElementById('screen-prog').classList.contains('active')){
+              const hc=document.getElementById('progCiclosHdr'),ps=document.getElementById('progSubjefe');
+              if(hc&&ps&&ps.value===sub)hc.innerHTML=progCiclosHdr(activePred,sub,getProgMonday(progWeekOffset));
+            }
           });
       }
     }
@@ -2294,6 +2298,22 @@ function populateProgSubjefe(){
   if(!cur&&pD().subjefes.length===1)sel.value=pD().subjefes[0];else sel.value=cur;
 }
 
+// ── Ciclos (épocas) en la programación (2026-11-10) ──
+// Ciclos del subjefe que están vigentes algún día de la semana MIÉ→MAR
+function progCiclosSemana(pid,sub,wedIso){
+  const d=getProgDays(wedIso),ini=d[0],fin=d[d.length-1];
+  return cyclesOf(pid,sub).filter(c=>c.inicio<=fin&&(c.fin===null||c.fin>=ini));
+}
+function progCicloTag(t){
+  if(!t||!t.cicloTemporada)return '';
+  return `<span class="tbadge tb-${t.cicloTemporada}" style="font-size:10px;padding:2px 7px">${TICONS[t.cicloTemporada]||''} ${TNAMES[t.cicloTemporada]||t.cicloTemporada}${t.cicloSector?' · '+t.cicloSector:''}</span>`;
+}
+function progCiclosHdr(pid,sub,wedIso){
+  const cs=progCiclosSemana(pid,sub,wedIso);
+  if(!cs.length)return `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Épocas: <span class="tbadge tb-none" style="font-size:10px;padding:2px 8px">Sin ciclo</span></div>`;
+  const counts={};cs.forEach(c=>counts[c.temporada]=(counts[c.temporada]||0)+1);
+  return `<div style="font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">Épocas de la semana: ${cs.map(c=>`<span class="tbadge tb-${c.temporada}" style="font-size:10px;padding:2px 8px">${TICONS[c.temporada]} ${TNAMES[c.temporada]}${cicloExtra(c,counts)}${c.fin===null?' ●':''}</span>`).join('')}</div>`;
+}
 function progPintarDias(prog,progDays,mondayIso,subjefe,contentDiv){
   progDays.forEach(dayIso=>{
     const tasks=(prog.dias||{})[dayIso]||[];
@@ -2307,7 +2327,8 @@ function progPintarDias(prog,progDays,mondayIso,subjefe,contentDiv){
     let tasksHTML=tasks.length?tasks.map((t,i)=>{
       const l=laborInfo(t.laborId,progLV);
       const tNorm=normLaborId(t.laborId,progLV);
-      const realMesas=realEntries.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>normLaborId(lr.laborId,recLV(e))===tNorm).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
+      const entsT=t.cicloId?realEntries.filter(e=>e.cicloId===t.cicloId):realEntries;   // con época: solo lo registrado en esa época
+      const realMesas=entsT.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>normLaborId(lr.laborId,recLV(e))===tNorm).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
       const pct=t.metaMesas>0?Math.min(100,Math.round(realMesas/t.metaMesas*100)):null;
       const bc=pct===null?'var(--green)':pct>=100?'var(--c-primor)':pct>=60?'#F4A261':'var(--red)';
       return `<div class="prog-task">
@@ -2315,6 +2336,7 @@ function progPintarDias(prog,progDays,mondayIso,subjefe,contentDiv){
         <div class="prog-task-info">
           <div class="prog-task-labor">${l?`<span style="color:var(--muted);font-family:'DM Mono',monospace">${t.laborId}.</span> ${l.d}`:'—'}</div>
           <div class="prog-task-meta">
+            ${progCicloTag(t)}
             <span class="prog-tag ptag-mod">📍 ${t.postura?'Postura '+t.postura:(t.modulo?'Módulo '+t.modulo:'—')}</span>
             ${t.metaMesas?`<span class="prog-tag ptag-meta">🎯 ${t.metaMesas} mesas</span>`:''}
             ${realMesas?`<span class="prog-tag ptag-real">✅ ${realMesas} real</span>`:''}
@@ -2381,10 +2403,13 @@ async function renderProg(){
   const subjefe=document.getElementById('progSubjefe').value;
   const contentDiv=document.getElementById('progContent');
   const newBtnDiv=document.getElementById('progNewBtn');
-  if(!subjefe){contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div>Selecciona un subjefe</div></div>`;newBtnDiv.innerHTML='';if(progListener){progListener();progListener=null;}return;}
+  if(!subjefe){const hc=document.getElementById('progCiclosHdr');if(hc)hc.innerHTML='';contentDiv.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div>Selecciona un subjefe</div></div>`;newBtnDiv.innerHTML='';if(progListener){progListener();progListener=null;}return;}
 
   // Limpiar listener anterior
   if(progListener){progListener();progListener=null;}
+  let hdrCic=document.getElementById('progCiclosHdr');
+  if(!hdrCic){hdrCic=document.createElement('div');hdrCic.id='progCiclosHdr';contentDiv.parentNode.insertBefore(hdrCic,contentDiv);}
+  hdrCic.innerHTML=progCiclosHdr(activePred,subjefe,mondayIso);
 
   // ══ LISTENER EN TIEMPO REAL ══
   // Se suscribe a cambios en la programación de esta semana y subjefe específico
@@ -2506,6 +2531,7 @@ function openModalNuevaProg(subjefe,mondayIso){
   document.getElementById('modalContent').innerHTML=`
     <div class="modal-title">📋 Programación — ${subjefe}</div>
     <div class="modal-sub">Semana del ${fDMY(mondayIso)} → ${fDMY(progDays[4])}</div>
+    ${progCiclosHdr(activePred,subjefe,mondayIso)}
     ${progDays[4]<=todayIso?`<div style="background:#FFF4E5;border:1px solid #F4A261;border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:10px">⚠️ Esta semana ${progDays[4]===todayIso?'termina hoy':'ya terminó'}. Si vas a programar la semana que viene, cierra y avanza con ›.</div>`:''}
     <div id="progSaveStatus" style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);margin:-4px 0 10px;min-height:14px">Autoguardado activo</div>
     <div id="progModalDias"></div>
@@ -2563,9 +2589,29 @@ function renderProgModalDias(progDays,dayNames){
     </div><div style="height:1px;background:var(--sand);margin:4px 0 14px"></div>`;
   }).join('');
 }
+// Selector de época: aparece cuando el subjefe tiene 2+ ciclos vigentes ese día (ej. Verano y Primor)
+function progCicloSelHTML(dayIso,ti,t){
+  const ed=window._progEdit;if(!ed)return '';
+  const cs=getCiclosEn(ed.predioId,ed.subjefe,dayIso);
+  const huerfano=t.cicloId&&!cs.some(c=>c.id===t.cicloId);
+  if(cs.length<2&&!huerfano)return '';
+  return `<div class="form-row"><label>Época / ciclo</label><select onchange="updPTCiclo('${dayIso}',${ti},this.value)">
+    <option value="">— Todas / sin especificar —</option>
+    ${cs.map(c=>`<option value="${c.id}"${t.cicloId===c.id?' selected':''}>${cicloLabel(c)}</option>`).join('')}
+    ${huerfano?`<option value="${t.cicloId}" selected>${TICONS[t.cicloTemporada]||''} ${TNAMES[t.cicloTemporada]||'Época'}${t.cicloSector?' · '+t.cicloSector:''} (no vigente este día)</option>`:''}
+  </select></div>`;
+}
+function updPTCiclo(dayIso,ti,cid){
+  const ed=window._progEdit;const t=ed&&ed.dias[dayIso]&&ed.dias[dayIso][ti];if(!t)return;
+  if(!cid){delete t.cicloId;delete t.cicloTemporada;delete t.cicloSector;progMarkDirty();return;}
+  if(cid===t.cicloId)return;
+  const c=cyclesOf(ed.predioId,ed.subjefe).find(x=>x.id===cid);if(!c)return;
+  t.cicloId=c.id;t.cicloTemporada=c.temporada;t.cicloSector=c.sector||null;progMarkDirty();
+}
 function progTaskFormHTML(dayIso,ti,t={}){
   return `<div class="ptask-form" id="ptf-${dayIso}-${ti}">
     <div class="ptask-form-hdr"><span class="ptask-form-num">Tarea ${ti+1}</span><button class="del-btn" onclick="rmProgTask('${dayIso}',${ti})">✕</button></div>
+    ${progCicloSelHTML(dayIso,ti,t)}
     <div class="form-row"><label>Labor</label><select onchange="updPT('${dayIso}',${ti},'laborId',parseInt(this.value))"><option value="">— Seleccionar —</option>${LABORES.map(l=>`<option value="${l.id}"${t.laborId===l.id?' selected':''}>${l.id}. ${l.d}</option>`).join('')}</select></div>
     <div class="form-grid">
       <div><label>Postura</label><select onchange="updPT('${dayIso}',${ti},'postura',parseInt(this.value)||null)"><option value="">—</option>${[1,2,3].map(p=>`<option value="${p}"${t.postura===p?' selected':''}>Postura ${p}</option>`).join('')}</select></div>
@@ -4014,15 +4060,19 @@ function avLaboresProg(prog,dias){
   const L={};
   dias.forEach(iso=>((prog.dias||{})[iso]||[]).forEach(t=>{
     if(t.laborId==null||t.laborId==='')return;
-    const nid=normLaborId(+t.laborId,prog.lv||1),k=avKey(nid);
+    const nid=normLaborId(+t.laborId,prog.lv||1),lk=avKey(nid);
+    const cid=t.cicloId||null,k=lk+(cid?'|'+cid:'');   // misma labor en distinta época = labores separadas (2026-11-10)
     const info=laborInfo(+t.laborId,prog.lv||1);
-    if(!L[k])L[k]={k,nid,cod:t.laborId,desc:info?info.d:'(labor '+t.laborId+')',dias:[],posturas:new Set(),meta:0};
+    if(!L[k])L[k]={k,lk,nid,cod:t.laborId,desc:info?info.d:'(labor '+t.laborId+')',dias:[],posturas:new Set(),meta:0,
+      cicloId:cid,cicloTemporada:cid?(t.cicloTemporada||null):null,cicloSector:cid?(t.cicloSector||null):null};
     if(!L[k].dias.includes(iso))L[k].dias.push(iso);
     if(t.postura)L[k].posturas.add(t.postura);
     L[k].meta+=+t.metaMesas||0;
   }));
-  return Object.values(L).sort((a,b)=>a.dias[0].localeCompare(b.dias[0])||String(a.cod).localeCompare(String(b.cod),'es',{numeric:true}));
+  return Object.values(L).sort((a,b)=>a.dias[0].localeCompare(b.dias[0])||String(a.cod).localeCompare(String(b.cod),'es',{numeric:true})||String(a.cicloTemporada||'').localeCompare(String(b.cicloTemporada||'')));
 }
+function avEpTxt(l){return l&&l.cicloId?`${TNAMES[l.cicloTemporada]||'Época'}${l.cicloSector?' · '+l.cicloSector:''}`:''}
+function avEpIco(l){return l&&l.cicloId?`${TICONS[l.cicloTemporada]||''} ${avEpTxt(l)}`:''}
 // ¿La labor se registra en mesas? Se mira la zona en las últimas semanas: si hubo horas pero nunca mesas,
 // no se mide avance (ej. aplicaciones). Si nunca se ha registrado, se mide (queda como pendiente).
 function avMedibles(regsHist){
@@ -4042,7 +4092,7 @@ function calcAvanceSemanal(regsPorZona,progs,wed,corte){
     const labs=P.prog?avLaboresProg(P.prog,dias):[];
     const activas=labs.filter(l=>l.dias.some(d=>d<=corte));
     const proximas=labs.filter(l=>!l.dias.some(d=>d<=corte));
-    const med=activas.filter(l=>medible(l.k)),noMed=activas.filter(l=>!medible(l.k));
+    const med=activas.filter(l=>medible(l.lk)),noMed=activas.filter(l=>!medible(l.lk));
     med.forEach(l=>{const tot=l.dias.length,ya=l.dias.filter(d=>d<=corte).length;l.esp=tot?ya/tot:1;l.diasYa=ya});
     // Encargados propios activos del subjefe (de cualquier colección)
     const ws=sortWs(wTodos().filter(w=>esActivo(w)&&!w.consolidadoEn&&nSub(w.subjefe)===nSub(P.sub)));
@@ -4053,21 +4103,27 @@ function calcAvanceSemanal(regsPorZona,progs,wed,corte){
       const reemp=aus.filter(r=>r.reemplazoWorkerId&&r.reemplazoWorkerId!=='sin').length;
       // días trabajando prestado en otra zona (sus mesas allá no son las suyas)
       let prest=0;Object.entries(regsPorZona).forEach(([oz,rs])=>{if(oz===z)return;prest+=rs.filter(r=>r.fecha>=wed&&r.fecha<=corte&&r.workerId===w.id&&!r.ausente).length});
+      // Épocas en que trabaja el encargado: las de sus registros en la zona (semana + últimas semanas).
+      // Una labor programada para una época en la que no trabaja no le corresponde (no se mide).
+      // Si no tiene registros con época, se le miden todas.
+      const eps=new Set(regsZ.filter(r=>r.workerId===w.id&&!r.ausente&&r.cicloId).map(r=>r.cicloId));
       const porLab=med.map(l=>{
-        const real=propios.filter(r=>!r.ausente).reduce((s,r)=>{const lv=recLV(r);return s+(r.labores||[]).filter(x=>avKey(normLaborId(x.laborId,lv))===l.k).reduce((ss,x)=>ss+(+x.mesas||0),0)},0);
-        return {l,real,pct:M?real/M*100:null,esp:l.esp*100};
+        const aplica=!l.cicloId||!eps.size||eps.has(l.cicloId);
+        const real=propios.filter(r=>!r.ausente&&(!l.cicloId||r.cicloId===l.cicloId)).reduce((s,r)=>{const lv=recLV(r);return s+(r.labores||[]).filter(x=>avKey(normLaborId(x.laborId,lv))===l.lk).reduce((ss,x)=>ss+(+x.mesas||0),0)},0);
+        return {l,real,aplica,pct:M&&aplica?real/M*100:null,esp:l.esp*100};
       });
-      const base=M*med.length;
-      const logro=porLab.reduce((s,x)=>s+Math.min(x.real,M),0);
-      const esper=porLab.reduce((s,x)=>s+M*x.l.esp,0);
+      const apl=porLab.filter(x=>x.aplica);
+      const base=M*apl.length;
+      const logro=apl.reduce((s,x)=>s+Math.min(x.real,M),0);
+      const esper=apl.reduce((s,x)=>s+M*x.l.esp,0);
       const pct=base?logro/base*100:null,esp=base?esper/base*100:null;
       let estado,cod;
       if(!M){estado='Sin plantas en ficha';cod='nd'}
-      else if(!med.length){estado='Sin labores medibles a la fecha';cod='nd'}
+      else if(!apl.length){estado='Sin labores medibles a la fecha';cod='nd'}
       else if(pct>=99.5){estado='Completo';cod='ok'}
       else if(pct>=esp-AV_TOL){estado='Al día';cod='ok'}
       else{estado='Atrasado';cod='down'}
-      return {w,M,porLab,pct,esp,logro,base,aus:aus.length,reemp,prest,estado,cod};
+      return {w,M,porLab,nLab:apl.length,eps,pct,esp,logro,base,aus:aus.length,reemp,prest,estado,cod};
     });
     const sM=filas.reduce((s,x)=>s+x.M,0);
     const tB=filas.reduce((s,x)=>s+x.base,0),tL=filas.reduce((s,x)=>s+x.logro,0),tE=filas.reduce((s,x)=>s+(x.base?x.esp/100*x.base:0),0);
@@ -4100,16 +4156,16 @@ async function avPreparar(){
 }
 function avFmt(p){return p==null?'—':Math.round(p)+'%'}
 function buildSheetAvance(R){
-  const rows=[['Zona','Subjefe','Encargado','Plantas','Mesas asignadas','Labor (cód.)','Labor','Días programados','Mesas realizadas','% avance','% esperado a la fecha','Estado','Días ausente','Días prestado a otra zona']];
+  const rows=[['Zona','Subjefe','Encargado','Plantas','Mesas asignadas','Labor (cód.)','Labor','Época','Días programados','Mesas realizadas','% avance','% esperado a la fecha','Estado','Días ausente','Días prestado a otra zona']];
   R.A.forEach(G=>G.filas.forEach(x=>{
-    x.porLab.forEach(p=>rows.push([PREDIOS[G.z].nombre,G.sub,wDisplay(x.w),+x.w.plantas||0,x.M,p.l.cod,p.l.desc,p.l.dias.map(fDMY).join(' · '),p.real,p.pct==null?'':Math.round(p.pct),Math.round(p.esp),'',x.aus,x.prest]));
-    rows.push([PREDIOS[G.z].nombre,G.sub,wDisplay(x.w),+x.w.plantas||0,x.M,'TOTAL','Todas las labores medibles programadas a la fecha','',x.porLab.reduce((s,p)=>s+p.real,0),x.pct==null?'':Math.round(x.pct),x.esp==null?'':Math.round(x.esp),x.estado,x.aus,x.prest]);
+    x.porLab.forEach(p=>rows.push([PREDIOS[G.z].nombre,G.sub,wDisplay(x.w),+x.w.plantas||0,x.M,p.l.cod,p.l.desc,avEpTxt(p.l)||'Todas',p.l.dias.map(fDMY).join(' · '),p.real,p.pct==null?'':Math.round(p.pct),Math.round(p.esp),p.aplica?'':'No corresponde (no trabaja en esa época)',x.aus,x.prest]));
+    rows.push([PREDIOS[G.z].nombre,G.sub,wDisplay(x.w),+x.w.plantas||0,x.M,'TOTAL','Todas las labores medibles programadas a la fecha','','',x.porLab.reduce((s,p)=>s+p.real,0),x.pct==null?'':Math.round(x.pct),x.esp==null?'':Math.round(x.esp),x.estado,x.aus,x.prest]);
   }));
   return rows;
 }
 function buildSheetAvanceResumen(R){
   const rows=[['Zona','Subjefe','Encargado','Plantas','Mesas asignadas','Labores medibles a la fecha','% avance semana','% esperado a la fecha','Estado','Días ausente','Días reemplazado','Días prestado']];
-  R.A.forEach(G=>G.filas.forEach(x=>rows.push([PREDIOS[G.z].nombre,G.sub,wDisplay(x.w),+x.w.plantas||0,x.M,G.med.length,x.pct==null?'':Math.round(x.pct),x.esp==null?'':Math.round(x.esp),x.estado,x.aus,x.reemp,x.prest])));
+  R.A.forEach(G=>G.filas.forEach(x=>rows.push([PREDIOS[G.z].nombre,G.sub,wDisplay(x.w),+x.w.plantas||0,x.M,x.nLab,x.pct==null?'':Math.round(x.pct),x.esp==null?'':Math.round(x.esp),x.estado,x.aus,x.reemp,x.prest])));
   return rows;
 }
 function buildSheetAvanceCriterios(R){
@@ -4127,7 +4183,8 @@ function buildSheetAvanceCriterios(R){
     ['7. No se mide avance en labores que en las últimas '+Math.round(AV_LOOKBACK_DIAS/7)+' semanas se registraron con horas pero sin mesas (ej. aplicaciones).'],
     ['8. Solo cuentan los registros en la zona del encargado. Días prestado a otra zona y días ausente bajan su avance; si tuvo reemplazo, las mesas de esos días quedan a nombre del reemplazante.'],
     ['9. Si la semana no tiene programación propia, se usa la hecha el martes anterior sobre la semana que terminaba (igual que en la pantalla Programación).'],
-    ['10. Mesas registradas con persona de apoyo cuentan completas al encargado (así se registran).']];
+    ['10. Mesas registradas con persona de apoyo cuentan completas al encargado (así se registran).'],
+    ['11. Épocas: si la tarea programada indica época (ej. Verano o Primor), la misma labor en dos épocas se mide por separado y solo cuentan las mesas registradas en esa época. A cada encargado solo se le miden las épocas en que tiene registros en las últimas '+Math.round(AV_LOOKBACK_DIAS/7)+' semanas; si no tiene registros con época, se le miden todas. Tareas sin época cuentan los registros de cualquier época.']];
   if(R.sinRango.length)rows.push([],['⚠️ Sin conexión para leer el rango completo de: '+R.sinRango.join(', ')+'. Los datos pueden estar incompletos.']);
   return rows;
 }
@@ -4167,12 +4224,12 @@ function buildAvanceHTML(R){
     if(!G.prog)return `<div class="card"><h2>${esc(zn)} · ${esc(G.sub)} · ${G.filas.length} encargados · ≈${G.sM.toLocaleString('es-CL')} mesas</h2><div class="warn">Sin programación para la semana del ${fDMY(R.wed)}: no hay contra qué comparar.</div></div>`;
     const labTxt=G.labs.map(l=>{
       const ya=l.dias.some(d=>d<=R.corte),m=G.med.includes(l);
-      return `<span class="lab ${!ya?'fut':!m?'nomed':''}"><b>${esc(l.cod)}.</b> ${esc(l.desc)} <span class="sm">${l.dias.map(d=>progDayName(R.wed,d).slice(0,3)).join('·')}${l.posturas.size?' · P'+[...l.posturas].join(',P'):''}${l.meta?' · meta equipo '+l.meta:''}${!ya?' · aún no':!m?' · no se mide en mesas':''}</span></span>`}).join('');
-    const ths=G.med.map(l=>`<th class="c">${esc(l.cod)}<div class="sm">${esc(l.desc.length>22?l.desc.slice(0,21)+'…':l.desc)}</div><div class="sm">esperado ${Math.round(l.esp*100)}%</div></th>`).join('');
+      return `<span class="lab ${!ya?'fut':!m?'nomed':''}"><b>${esc(l.cod)}.</b> ${esc(l.desc)}${l.cicloId?` <b>${esc(avEpIco(l))}</b>`:''} <span class="sm">${l.dias.map(d=>progDayName(R.wed,d).slice(0,3)).join('·')}${l.posturas.size?' · P'+[...l.posturas].join(',P'):''}${l.meta?' · meta equipo '+l.meta:''}${!ya?' · aún no':!m?' · no se mide en mesas':''}</span></span>`}).join('');
+    const ths=G.med.map(l=>`<th class="c">${esc(l.cod)}<div class="sm">${esc(l.desc.length>22?l.desc.slice(0,21)+'…':l.desc)}</div>${l.cicloId?`<div class="sm"><b>${esc(avEpIco(l))}</b></div>`:''}<div class="sm">esperado ${Math.round(l.esp*100)}%</div></th>`).join('');
     const filas=G.filas.map(x=>{
       const [fg,bg]=AV_CHIP[x.cod];
       const notas=[x.aus?`${x.aus} día(s) ausente${x.reemp?` (${x.reemp} con reemplazo)`:''}`:'',x.prest?`${x.prest} día(s) prestado a otra zona`:''].filter(Boolean).join(' · ');
-      const celdas=x.porLab.map(p=>`<td class="c" style="color:${avColor(p.pct,p.esp)}">${x.M?Math.round(p.pct)+'%':'—'}<div class="sm">${p.real}/${x.M||'?'}</div></td>`).join('');
+      const celdas=x.porLab.map(p=>!p.aplica?`<td class="c" style="color:#B0B0B0" title="No trabaja en esa época">n/a<div class="sm">otra época</div></td>`:`<td class="c" style="color:${avColor(p.pct,p.esp)}">${x.M?Math.round(p.pct)+'%':'—'}<div class="sm">${p.real}/${x.M||'?'}</div></td>`).join('');
       return `<tr><td><b>${esc(wDisplay(x.w))}</b><div class="sm">${x.w.plantas?(+x.w.plantas).toLocaleString('es-CL')+' pl. → ≈'+x.M+' mesas':'sin plantas en ficha'}${notas?' · '+notas:''}</div></td>
         <td class="c big" style="color:${avColor(x.pct,x.esp)}">${avFmt(x.pct)}<div class="sm">esperado ${avFmt(x.esp)}</div></td>
         <td>${x.pct==null?'<div class="sm">—</div>':bar(x.pct,x.esp)}</td>
@@ -4217,6 +4274,7 @@ ${cards}
 <li>Cada labor programada en la semana se toma como <b>una pasada por todas las mesas</b> del encargado. <b>% avance</b> = mesas registradas en esa labor desde el miércoles hasta el corte ÷ mesas asignadas.</li>
 <li><b>Esperado a la fecha</b> = días programados de la labor ya transcurridos ÷ días programados. Las labores programadas para después del corte no se cuentan todavía.</li>
 <li><b>Avance de la semana</b> = suma de mesas hechas (máx. 100% por labor) ÷ (mesas asignadas × labores). <b>Al día</b>: no más de ${AV_TOL} puntos bajo lo esperado.</li>
+<li><b>Épocas</b>: una labor programada en Verano y en Primor se mide por separado, contando solo las mesas registradas en esa época. A cada encargado solo se le miden las épocas en que ha trabajado en las últimas ${Math.round(AV_LOOKBACK_DIAS/7)} semanas (las otras aparecen como <i>n/a</i>).</li>
 <li>No se mide en mesas una labor que en las últimas ${Math.round(AV_LOOKBACK_DIAS/7)} semanas se registró con horas pero sin mesas (ej. aplicaciones). Días ausente o prestado a otra zona bajan el avance; si hubo reemplazo, esas mesas quedan a nombre del reemplazante.</li>
 </ul></div></div></body></html>`;
 }
