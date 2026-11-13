@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-11-10-2';
+const APP_V = '2026-11-13-1';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -567,6 +567,10 @@ select:focus,input:focus{border-color:var(--green)}
         <div class="sec-div">Unir dos fichas de la misma persona</div>
         <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Para cuando una persona aparece dos veces (p. ej. con distinto segundo apellido). Eliges la ficha que <b>queda</b>, la que <b>se une</b> y el nombre final. Registros, reemplazos y fotos pasan a la ficha que queda; la otra queda inactiva (🔗, no se borra).</p>
         <button class="btn btn-secondary" onclick="modalUnirW()">🔗 Unir dos trabajadores</button>
+        <div class="sec-div">Cambio de subjefe · Zona 2</div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5"><b>Cynthia Ojeda</b> reemplaza a <b>Santiago Orrego</b>. Pasa sus encargados a Cynthia, copia sus ciclos y su programación, deja el usuario de Cynthia como Subjefe de Zona 2 y <b>bloquea el acceso de Santiago</b>. Los registros históricos no se modifican.</p>
+        <div id="cambioSubEstado" style="font-size:12px;margin-bottom:9px"></div>
+        <button class="btn btn-primary" id="cambioSubBtn" onclick="cambiarSubjefe202611()">🔄 Aplicar cambio de subjefe</button>
       </div>
     </div>
     <!-- usuarios del sistema (solo admin) -->
@@ -667,10 +671,13 @@ select:focus,input:focus{border-color:var(--green)}
 // ══════════════════════════════════════════════
 const PREDIOS={
   z1:{nombre:'Zona 1 La Viña', jefe:'José Yáñez',        subjefes:['Mirta Peña']},
-  z2:{nombre:'Zona 2',         jefe:'Guillermo Olivares', subjefes:['Santiago Orrego']},
+  z2:{nombre:'Zona 2',         jefe:'Guillermo Olivares', subjefes:['Cynthia Ojeda']},   // 2026-11-13: reemplaza a Santiago Orrego
   z3:{nombre:'Zona 3',         jefe:'René Albornoz',      subjefes:['Claudio Cuevas']}
 };
 const PRED_ORDER=['z1','z2','z3'];
+// Cambio de subjefe (nov. 2026): Cynthia Ojeda reemplaza a Santiago Orrego en Zona 2.
+// Lo aplica el admin desde Config → "Cambio de subjefe" (cambiarSubjefe202611).
+const CAMBIO_SUBJEFE_2026_11={pid:'z2',de:'Santiago Orrego',a:'Cynthia Ojeda'};
 const DIAS=['Lunes','Martes','Miérc.','Jueves','Viernes'];
 const TNAMES={otono:'Otoño',invierno:'Invierno',primor:'Primor',trastomate:'Trastomate',verano:'Verano'};
 const TICONS={otono:'🍂',invierno:'❄️',primor:'🌱',trastomate:'🔄',verano:'☀️'};
@@ -845,52 +852,52 @@ const DOTACION_2026_09=[
   {"n": "Marcelo", "a": "Amaro Galarce", "p": 12000, "s": "Claudio Cuevas"},
   {"n": "Miguelina", "a": "Arancibia Cisternas", "p": 14000, "s": "Mirta Peña"},
   {"n": "Ana", "a": "Araya Quiroz", "p": 10000, "s": "Mirta Peña"},
-  {"n": "Ruth", "a": "Avaria Barahona", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Ruth", "a": "Avaria Barahona", "p": 14000, "s": "Cynthia Ojeda"},
   {"n": "Jose", "a": "Cardenas Guzman", "p": 12000, "s": "Mirta Peña"},
-  {"n": "Patricia", "a": "Castillo Beiza", "p": 14000, "s": "Santiago Orrego"},
-  {"n": "Otalus", "a": "Charles", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Patricia", "a": "Castillo Beiza", "p": 14000, "s": "Cynthia Ojeda"},
+  {"n": "Otalus", "a": "Charles", "p": 14000, "s": "Cynthia Ojeda"},
   {"n": "Wildor", "a": "Derilus", "p": 14000, "s": "Mirta Peña"},
   {"n": "Jimena", "a": "Leiva Parra", "p": 9500, "s": "Mirta Peña"},
   {"n": "Eugenia", "a": "Espinoza Moya", "p": 12000, "s": "Mirta Peña"},
   {"n": "Javier", "a": "Espinoza Pallero", "p": 12000, "s": "Mirta Peña"},
-  {"n": "Patricio", "a": "Figueroa Cayul", "p": 12000, "s": "Santiago Orrego"},
+  {"n": "Patricio", "a": "Figueroa Cayul", "p": 12000, "s": "Cynthia Ojeda"},
   {"n": "Miguel", "a": "Figueroa Farias", "p": 14000, "s": "Mirta Peña"},
   {"n": "Lenise", "a": "Fleurisma", "p": 12000, "s": "Claudio Cuevas"},
-  {"n": "Margarita", "a": "Flores Beiza", "p": 12000, "s": "Santiago Orrego"},
-  {"n": "Leonor", "a": "Fuentes Fuentes", "p": 9500, "s": "Santiago Orrego"},
+  {"n": "Margarita", "a": "Flores Beiza", "p": 12000, "s": "Cynthia Ojeda"},
+  {"n": "Leonor", "a": "Fuentes Fuentes", "p": 9500, "s": "Cynthia Ojeda"},
   {"n": "Daniela", "a": "Gamboa Pacheco", "p": 14000, "s": "Claudio Cuevas"},
   {"n": "Beatriz", "a": "Gonzalez Vera", "p": 10000, "s": "Mirta Peña"},
   {"n": "Patricio", "a": "Guzman Figueroa", "p": 14000, "s": "Claudio Cuevas"},
   {"n": "Ruben", "a": "Hernandez Acevedo", "p": 14000, "s": "Claudio Cuevas"},
   {"n": "Camilo", "a": "Hidalgo Ossandon", "p": 11500, "s": "Claudio Cuevas"},
   {"n": "Jismond", "a": "Jeune", "p": 14000, "s": "Mirta Peña"},
-  {"n": "Luis", "a": "Lazo Jorquera", "p": 14000, "s": "Santiago Orrego"},
-  {"n": "Francisco", "a": "Leiva Leiva", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Luis", "a": "Lazo Jorquera", "p": 14000, "s": "Cynthia Ojeda"},
+  {"n": "Francisco", "a": "Leiva Leiva", "p": 14000, "s": "Cynthia Ojeda"},
   {"n": "Francisco", "a": "Leiva Nuñez", "p": 12500, "s": "Mirta Peña"},
-  {"n": "Luis", "a": "Leiva Zamora", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Luis", "a": "Leiva Zamora", "p": 14000, "s": "Cynthia Ojeda"},
   {"n": "Luisa", "a": "Levinao Ñanco", "p": 12000, "s": "Mirta Peña"},
   {"n": "Juan", "a": "Mendoza Ortega", "p": 13000, "s": "Mirta Peña"},
-  {"n": "Marie-Rose", "a": "Merite", "p": 12000, "s": "Santiago Orrego"},
+  {"n": "Marie-Rose", "a": "Merite", "p": 12000, "s": "Cynthia Ojeda"},
   {"n": "Alicia", "a": "Miranda Miranda", "p": 9500, "s": "Claudio Cuevas"},
   {"n": "Carola", "a": "Miranda Ossandon", "p": 9500, "s": "Claudio Cuevas"},
   {"n": "Pilar", "a": "Miranda Miranda", "p": 9500, "s": "Claudio Cuevas"},
   {"n": "Paulo", "a": "Molina Castillo", "p": 12000, "s": "Claudio Cuevas"},
-  {"n": "Jorge", "a": "Navarro Borquez", "p": 10000, "s": "Santiago Orrego"},
+  {"n": "Jorge", "a": "Navarro Borquez", "p": 10000, "s": "Cynthia Ojeda"},
   {"n": "Ines", "a": "Nuñez Gonzalez", "p": 10000, "s": "Claudio Cuevas"},
-  {"n": "Gulove", "a": "Oge", "p": 10000, "s": "Santiago Orrego"},
+  {"n": "Gulove", "a": "Oge", "p": 10000, "s": "Cynthia Ojeda"},
   {"n": "Juan", "a": "Olivares Ramirez", "p": 12000, "s": "Claudio Cuevas"},
   {"n": "Carlos", "a": "Olmedo Gomez", "p": 13000, "s": "Mirta Peña"},
-  {"n": "Juan", "a": "Orostica Ahumada", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Juan", "a": "Orostica Ahumada", "p": 14000, "s": "Cynthia Ojeda"},
   {"n": "Jose", "a": "Orostica Cabanes", "p": 12500, "s": "Claudio Cuevas"},
   {"n": "Christian", "a": "Pereira Trigo", "p": 10000, "s": "Mirta Peña"},
   {"n": "Reginald", "a": "Pierre", "p": 13000, "s": "Mirta Peña"},
   {"n": "Jose", "a": "Queipul Linco", "p": 9500, "s": "Claudio Cuevas"},
-  {"n": "Yesenia", "a": "Quezada Vera", "p": 10000, "s": "Santiago Orrego"},
-  {"n": "Jorge", "a": "Ramirez Muñoz", "p": 11000, "s": "Santiago Orrego"},
+  {"n": "Yesenia", "a": "Quezada Vera", "p": 10000, "s": "Cynthia Ojeda"},
+  {"n": "Jorge", "a": "Ramirez Muñoz", "p": 11000, "s": "Cynthia Ojeda"},
   {"n": "Juan", "a": "Rodriguez Cisternas", "p": 14000, "s": "Claudio Cuevas"},
-  {"n": "Eduardo", "a": "Rodriguez Cisternas", "p": 14000, "s": "Santiago Orrego"},
+  {"n": "Eduardo", "a": "Rodriguez Cisternas", "p": 14000, "s": "Cynthia Ojeda"},
   {"n": "Teresita", "a": "Rojas Soto", "p": 10000, "s": "Claudio Cuevas"},
-  {"n": "Francisco", "a": "Salas Salas", "p": 10000, "s": "Santiago Orrego"},
+  {"n": "Francisco", "a": "Salas Salas", "p": 10000, "s": "Cynthia Ojeda"},
   {"n": "Charleus", "a": "Seneat", "p": 13000, "s": "Mirta Peña"},
   {"n": "Batilus", "a": "Titus", "p": 14000, "s": "Claudio Cuevas"},
   {"n": "Juan", "a": "Valdivia Aparicio", "p": 14000, "s": "Mirta Peña"},
@@ -986,7 +993,7 @@ function isJefe(){return currentProfile&&currentProfile.role==='jefe'}
 // y los informes. Solo queda reservado a admin: usuarios del sistema, costo de
 // jornada y el borrado masivo de registros.
 function veTodoPredio(){return true}
-const ROLE_LABEL={admin:'Admin',jefe:'Jefe de zona',subjefe:'Subjefe'};
+const ROLE_LABEL={admin:'Admin',jefe:'Jefe de zona',subjefe:'Subjefe',bloqueado:'⛔ Sin acceso'};
 function canEditPredio(pid){
   if(isAdmin())return true;
   return currentProfile&&currentProfile.predioId===pid;
@@ -1067,6 +1074,12 @@ auth.onAuthStateChanged(async user=>{
       await colUsers().doc(user.uid).set(currentProfile);
     } else {
       currentProfile=snap.data();
+    }
+    if(currentProfile&&currentProfile.bloqueado){
+      loading(false);currentProfile=null;
+      await auth.signOut();
+      toast('⛔ Este usuario ya no tiene acceso a la app. Consulta con el administrador.');
+      return;
     }
     bootApp();
   }catch(e){
@@ -2770,6 +2783,12 @@ async function renderConfig(){
       `<div style="margin-top:5px;color:${hecha?'var(--green)':'var(--muted)'}">${hecha?'✅ Aplicada el '+fHora(hecha):`Total: ${DOTACION_2026_09.length} encargados · aún no aplicada`}</div>`;
     const bt=document.getElementById('dotacionBtn');if(bt)bt.style.display=hecha?'none':'block';
   }
+  const cse=document.getElementById('cambioSubEstado');
+  if(cse&&isAdmin()){
+    const c=cfgGlobal.cambioSubjefe202611;
+    cse.innerHTML=c?`<span style="color:var(--green)">✅ Aplicado el ${fHora(c.ts)} · ${c.workers} encargados · ${c.ciclos} ciclos · ${c.semanas} semanas de programación</span>`:'<span style="color:var(--muted)">Aún no aplicado</span>';
+    const b2=document.getElementById('cambioSubBtn');if(b2)b2.textContent=c?'🔄 Volver a aplicar (revisar)':'🔄 Aplicar cambio de subjefe';
+  }
   // costo jornada (admin only)
   if(isAdmin()){
     const ci=document.getElementById('cfgCostoJornada'),hi=document.getElementById('cfgHorasJornada');
@@ -2872,6 +2891,71 @@ async function aplicarDotacion202609(){
     await loadPredioData(activePred);
     renderConfig();
     toast(`✅ Dotación cargada: ${DOTACION_2026_09.length} encargados · ${aInactivar.length} inactivados`);
+  }catch(e){loading(false);toast('Error: '+e.message)}
+}
+
+// ── Cambio de subjefe (nov. 2026): Santiago Orrego → Cynthia Ojeda (Zona 2) ──
+// 1) Encargados (3 colecciones) con subjefe = anterior → nuevo (guarda subjefeAnterior).
+// 2) Copia ciclos arr_ciclos/{pid}_{de} → {pid}_{a} (mismos ids, así los registros con cicloId siguen casando).
+// 3) Copia programación arr_programacion/{pid}/subjefes/{de}/semanas → {a} (no pisa semanas que Cynthia ya tenga).
+// 4) Usuario de Cynthia → Subjefe, zona, subjefe nuevo. Usuario de Santiago → bloqueado (no puede entrar).
+// No modifica registros. Idempotente. Marca arr_config/global.cambioSubjefe202611.
+async function cambiarSubjefe202611(){
+  if(!isAdmin()){toast('Solo administradores');return}
+  const {pid,de,a}=CAMBIO_SUBJEFE_2026_11;
+  const norm=t=>nSub(t);
+  loading(true,'Revisando datos de '+de+'…');
+  let wSnaps,cicSnap,cicNew,progSnap,progNew,usSnap;
+  try{
+    [wSnaps,cicSnap,cicNew,progSnap,progNew,usSnap]=await Promise.all([
+      Promise.all(PRED_ORDER.map(z=>colWorkers(z).get())),
+      colCiclos(pid,de).get(),colCiclos(pid,a).get(),
+      colProg(pid,de).get(),colProg(pid,a).get(),
+      colUsers().get()]);
+  }catch(e){loading(false);toast('Error: '+e.message);return}
+  loading(false);
+  const ws=[];wSnaps.forEach((sn,i)=>sn.docs.forEach(d=>{if(norm(d.data().subjefe)===norm(de))ws.push({z:PRED_ORDER[i],id:d.id,activo:d.data().activo!==false})}));
+  const cicExist=new Set(cicNew.docs.map(d=>d.id));
+  const cics=cicSnap.docs.filter(d=>!cicExist.has(d.id));
+  const progExist=new Set(progNew.docs.map(d=>d.id));
+  const semanas=progSnap.docs.filter(d=>!progExist.has(d.id));
+  const us=usSnap.docs.map(d=>({uid:d.id,...d.data()}));
+  const txt=u=>norm((u.nombre||'')+' '+(u.email||''));
+  const yo=currentUser&&currentUser.uid;
+  const cyn=us.filter(u=>u.uid!==yo&&(txt(u).includes('cynthia')||txt(u).includes('ojeda')));
+  if(cyn.length===0){toast('⚠️ No encontré el usuario de Cynthia Ojeda (por nombre o email). Créalo primero en Usuarios.');return}
+  if(cyn.length>1){toast('⚠️ Hay '+cyn.length+' usuarios que parecen ser Cynthia: '+cyn.map(u=>u.email).join(', ')+'. Deja uno solo y vuelve a intentar.');return}
+  const c=cyn[0];
+  // Santiago: por nombre/email, o con su subjefe asignado — nunca Cynthia, nunca un admin ni tú.
+  const san=us.filter(u=>u.uid!==yo&&u.uid!==c.uid&&u.role!=='admin'&&!u.bloqueado&&(norm(u.subjefe)===norm(de)||txt(u).includes('orrego')));
+  const msg=`Cambio de subjefe en ${PREDIOS[pid].nombre}: ${de} → ${a}\n\n`+
+    `• Encargados que pasan a ${a}: ${ws.length} (${ws.filter(w=>w.activo).length} activos)\n`+
+    `• Ciclos a copiar: ${cics.length}${cicExist.size?` (ya tenía ${cicExist.size})`:''}\n`+
+    `• Semanas de programación a copiar: ${semanas.length}${progExist.size?` (ya tenía ${progExist.size}, no se pisan)`:''}\n`+
+    `• Usuario ${c.email} → Subjefe · ${PREDIOS[pid].nombre} · ${a}\n`+
+    `• Sin acceso (bloqueado): ${san.length?san.map(u=>u.email).join(', '):'— no encontré usuario de '+de+' —'}\n\n`+
+    `Los registros históricos no se modifican. ¿Continuar?`;
+  if(!confirm(msg))return;
+  loading(true,'Aplicando cambio de subjefe…');
+  try{
+    const ts=Date.now();const ops=[];
+    ws.forEach(w=>ops.push(b=>b.update(colWorkers(w.z).doc(w.id),{subjefe:a,subjefeAnterior:de,subjefeCambioTs:ts})));
+    cics.forEach(d=>ops.push(b=>b.set(colCiclos(pid,a).doc(d.id),{...d.data(),copiadoDe:de})));
+    semanas.forEach(d=>ops.push(b=>b.set(colProg(pid,a).doc(d.id),{...d.data(),copiadoDe:de})));
+    ops.push(b=>b.update(colUsers().doc(c.uid),{role:'subjefe',predioId:pid,subjefe:a}));
+    san.forEach(u=>ops.push(b=>b.update(colUsers().doc(u.uid),{bloqueado:true,bloqueadoTs:ts,role:'bloqueado',roleAnterior:u.role||'',subjefe:'',predioId:''})));
+    const marca={ts,workers:ws.length,ciclos:cics.length,semanas:semanas.length,usuario:c.email,bloqueados:san.map(u=>u.email)};
+    ops.push(b=>b.set(db.collection('arr_config').doc('global'),{cambioSubjefe202611:marca},{merge:true}));
+    for(let i=0;i<ops.length;i+=400){
+      const b=db.batch();ops.slice(i,i+400).forEach(fn=>fn(b));
+      loading(true,`Aplicando cambio… ${Math.min(i+400,ops.length)} / ${ops.length}`);
+      await b.commit();
+    }
+    cfgGlobal.cambioSubjefe202611=marca;
+    await loadPredioData(activePred);
+    try{loadUsers();}catch(e){}
+    renderConfig();
+    toast(`✅ ${a} es ahora subjefe de ${PREDIOS[pid].nombre}: ${ws.length} encargados, ${cics.length} ciclos, ${semanas.length} semanas`);
   }catch(e){loading(false);toast('Error: '+e.message)}
 }
 
