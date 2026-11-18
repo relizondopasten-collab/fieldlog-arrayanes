@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-11-13-1';
+const APP_V = '2026-11-18-1';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -1233,7 +1233,7 @@ async function loadPredioData(pid){
             if(document.getElementById('screen-ciclos').classList.contains('active'))renderCiclos();
             if(cpid===activePred&&document.getElementById('screen-prog').classList.contains('active')){
               const hc=document.getElementById('progCiclosHdr'),ps=document.getElementById('progSubjefe');
-              if(hc&&ps&&ps.value===sub)hc.innerHTML=progCiclosHdr(activePred,sub,getProgMonday(progWeekOffset));
+              if(hc&&ps&&ps.value===sub)renderProg();   // 2026-11-18: redibuja también las tareas (el real depende de las épocas vigentes)
             }
           });
       }
@@ -2340,9 +2340,16 @@ function progPintarDias(prog,progDays,mondayIso,subjefe,contentDiv){
     let tasksHTML=tasks.length?tasks.map((t,i)=>{
       const l=laborInfo(t.laborId,progLV);
       const tNorm=normLaborId(t.laborId,progLV);
+      const mesasDe=ents=>ents.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>normLaborId(lr.laborId,recLV(e))===tNorm).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
+      // 2026-11-18: con 2+ épocas vigentes ese día y tarea sin época, NO se suman las épocas
+      // (mezclar Primor y Verano contra una sola meta no tiene sentido): se muestra el real por época y no hay % de avance.
+      const csDia=t.cicloId?[]:getCiclosEn(activePred,subjefe,dayIso);
+      const faltaEp=!t.cicloId&&csDia.length>=2;
       const entsT=t.cicloId?realEntries.filter(e=>e.cicloId===t.cicloId):realEntries;   // con época: solo lo registrado en esa época
-      const realMesas=entsT.reduce((s,e)=>{const ls=e.labores||[{laborId:e.laborId,mesas:e.mesas||0}];return s+ls.filter(lr=>normLaborId(lr.laborId,recLV(e))===tNorm).reduce((ss,lr)=>ss+(lr.mesas||0),0)},0);
-      const pct=t.metaMesas>0?Math.min(100,Math.round(realMesas/t.metaMesas*100)):null;
+      const realMesas=faltaEp?0:mesasDe(entsT);
+      const realPorEp=faltaEp?csDia.map(c=>({c,m:mesasDe(realEntries.filter(e=>e.cicloId===c.id))})).filter(x=>x.m):[];
+      const realSinEp=faltaEp?mesasDe(realEntries.filter(e=>!e.cicloId||!csDia.some(c=>c.id===e.cicloId))):0;
+      const pct=!faltaEp&&t.metaMesas>0?Math.min(100,Math.round(realMesas/t.metaMesas*100)):null;
       const bc=pct===null?'var(--green)':pct>=100?'var(--c-primor)':pct>=60?'#F4A261':'var(--red)';
       return `<div class="prog-task">
         <div class="prog-task-num">${i+1}.</div>
@@ -2353,7 +2360,10 @@ function progPintarDias(prog,progDays,mondayIso,subjefe,contentDiv){
             <span class="prog-tag ptag-mod">📍 ${t.postura?'Postura '+t.postura:(t.modulo?'Módulo '+t.modulo:'—')}</span>
             ${t.metaMesas?`<span class="prog-tag ptag-meta">🎯 ${t.metaMesas} mesas</span>`:''}
             ${realMesas?`<span class="prog-tag ptag-real">✅ ${realMesas} real</span>`:''}
+            ${realPorEp.map(x=>`<span class="prog-tag ptag-real">✅ ${TICONS[x.c.temporada]||''} ${TNAMES[x.c.temporada]||'Época'}${x.c.sector?' · '+dbEsc(x.c.sector):''}: ${x.m} real</span>`).join('')}
+            ${realSinEp?`<span class="prog-tag ptag-real">✅ sin época: ${realSinEp} real</span>`:''}
           </div>
+          ${faltaEp?`<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ Tarea sin época y hay ${csDia.length} abiertas este día: edita la programación y elige la época para medir el avance.</div>`:''}
           ${t.metaMesas&&pct!==null?`<div class="prog-vs"><span class="prog-vs-label">Avance</span><div class="prog-vs-bar-wrap"><div class="prog-vs-bar" style="width:${pct}%;background:${bc}"></div></div><span class="prog-vs-pct" style="color:${bc}">${pct}%</span></div>`:''}
           ${t.notas?`<div style="font-size:11px;color:var(--muted);margin-top:4px">📌 ${t.notas}</div>`:''}
         </div>
@@ -2608,8 +2618,9 @@ function progCicloSelHTML(dayIso,ti,t){
   const cs=getCiclosEn(ed.predioId,ed.subjefe,dayIso);
   const huerfano=t.cicloId&&!cs.some(c=>c.id===t.cicloId);
   if(cs.length<2&&!huerfano)return '';
-  return `<div class="form-row"><label>Época / ciclo</label><select onchange="updPTCiclo('${dayIso}',${ti},this.value)">
-    <option value="">— Todas / sin especificar —</option>
+  const falta=!t.cicloId;
+  return `<div class="form-row"><label>Época / ciclo${falta?' <span style="color:var(--red)">· obligatorio</span>':''}</label><select onchange="updPTCiclo('${dayIso}',${ti},this.value);this.style.borderColor=this.value?'':'var(--red)'"${falta?' style="border-color:var(--red)"':''}>
+    <option value=""${falta?' selected':''} disabled>— Elegir época —</option>
     ${cs.map(c=>`<option value="${c.id}"${t.cicloId===c.id?' selected':''}>${cicloLabel(c)}</option>`).join('')}
     ${huerfano?`<option value="${t.cicloId}" selected>${TICONS[t.cicloTemporada]||''} ${TNAMES[t.cicloTemporada]||'Época'}${t.cicloSector?' · '+t.cicloSector:''} (no vigente este día)</option>`:''}
   </select></div>`;
