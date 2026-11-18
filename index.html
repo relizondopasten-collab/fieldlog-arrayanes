@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-11-18-1';
+const APP_V = '2026-11-18-2';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -509,6 +509,8 @@ select:focus,input:focus{border-color:var(--green)}
         <button class="btn btn-secondary" onclick="generarInforme('eficiencia')" style="font-size:11px;padding:8px;grid-column:span 2">⚡ Eficiencia: mesas/hora por labor y por trabajador</button>
         <button class="btn btn-secondary" onclick="generarInformeCapacidad()" style="font-size:11px;padding:8px">📐 Capacidad y carga (Excel)</button>
         <button class="btn btn-secondary" onclick="generarInformeCapacidadHTML()" style="font-size:11px;padding:8px">📐 Capacidad y carga (HTML)</button>
+        <button class="btn btn-primary" onclick="generarInformeAvanceDiarioHTML()" style="font-size:12px;padding:10px;grid-column:span 2">📅 Avance diario por encargado y labor (HTML)</button>
+        <button class="btn btn-secondary" onclick="generarInformeAvanceDiario()" style="font-size:11px;padding:8px;grid-column:span 2;border-color:var(--green)">📅 Avance diario por encargado y labor (Excel)</button>
         <button class="btn btn-secondary" onclick="generarInformeAvanceHTML()" style="font-size:11px;padding:8px;grid-column:span 2;border-color:var(--green)">🎯 Avance semanal por encargado vs programación (HTML)</button>
         <button class="btn btn-secondary" onclick="generarInformeAvance()" style="font-size:11px;padding:8px;grid-column:span 2">🎯 Avance semanal por encargado (Excel)</button>
         <div style="grid-column:span 2;font-size:10px;color:var(--muted);line-height:1.4;margin:-2px 0 4px">Avance semanal: usa la semana MIÉ→MAR que contiene la fecha <b>Hasta</b> (corte) y las 3 zonas, o solo el subjefe elegido.</div>
@@ -4247,7 +4249,7 @@ async function avPreparar(){
     for(const sub of subs){const p=await avLeerProg(z,sub,wed);progs.push({z,sub,prog:p&&!p.error?p:null,err:p&&p.error})}
   }
   const A=calcAvanceSemanal(regsPorZona,progs,wed,corte);
-  return {A,wed,corte,dias:getProgDays(wed),sinRango,msg,hastaPedido:hasta};
+  return {A,wed,corte,dias:getProgDays(wed),sinRango,msg,hastaPedido:hasta,regsPorZona};
 }
 function avFmt(p){return p==null?'—':Math.round(p)+'%'}
 function buildSheetAvance(R){
@@ -4372,6 +4374,181 @@ ${cards}
 <li><b>Épocas</b>: una labor programada en Verano y en Primor se mide por separado, contando solo las mesas registradas en esa época. A cada encargado solo se le miden las épocas en que ha trabajado en las últimas ${Math.round(AV_LOOKBACK_DIAS/7)} semanas (las otras aparecen como <i>n/a</i>).</li>
 <li>No se mide en mesas una labor que en las últimas ${Math.round(AV_LOOKBACK_DIAS/7)} semanas se registró con horas pero sin mesas (ej. aplicaciones). Días ausente o prestado a otra zona bajan el avance; si hubo reemplazo, esas mesas quedan a nombre del reemplazante.</li>
 </ul></div></div></body></html>`;
+}
+
+// ── Avance diario por encargado (2026-11-18) ──
+// Matriz encargado × día (MIÉ→MAR): labores registradas cada día con sus mesas y el % ACUMULADO de la pasada
+// (mesas acumuladas desde el miércoles ÷ mesas asignadas), comparado con lo esperado a ese día según la programación.
+// Usa el mismo cálculo y los mismos supuestos que el avance semanal (calcAvanceSemanal).
+const DOW_ES=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+function adDow(iso){return DOW_ES[new Date(iso+'T12:00:00').getDay()]}
+function calcAvanceDiario(R){
+  const RZ=R.regsPorZona||{};
+  return R.A.map(G=>{
+    const regsZ=RZ[G.z]||[];
+    // días: los de la programación (sin sáb/dom) + sáb/dom si hay registros del equipo; hasta el martes
+    const idsEq=new Set(G.filas.map(x=>x.w.id));
+    const dias=[];for(let i=0;i<7;i++){const d=avIsoMas(R.wed,i);if(R.dias.includes(d)||regsZ.some(r=>r.fecha===d&&idsEq.has(r.workerId)))dias.push(d)}
+    const progDia=d=>(G.prog&&(G.prog.dias||{})[d])||[];
+    const labs=G.labs||[],medK=new Set((G.med||[]).map(l=>l.k));
+    // casar una línea registrada con una labor programada: primero labor + época del registro, luego labor sin época
+    const casar=(lk,cid)=>labs.find(l=>l.lk===lk&&l.cicloId&&l.cicloId===cid)||labs.find(l=>l.lk===lk&&!l.cicloId)||null;
+    const espA=(l,d)=>{const tot=l.dias.length;return tot?l.dias.filter(x=>x<=d).length/tot*100:100};
+    const filas=G.filas.map(x=>{
+      const M=x.M,acum={};
+      const celdas=dias.map(d=>{
+        if(d>R.corte)return {d,fut:true,items:[],faltan:[]};
+        const rs=regsZ.filter(r=>r.fecha===d&&r.workerId===x.w.id);
+        const aus=rs.find(r=>r.ausente);
+        let prestA=null;Object.entries(RZ).forEach(([oz,rr])=>{if(oz!==G.z&&rr.some(r=>r.fecha===d&&r.workerId===x.w.id&&!r.ausente))prestA=PREDIOS[oz].nombre});
+        const items=[],vistos=new Set();
+        rs.filter(r=>!r.ausente).forEach(r=>{const lv=recLV(r);(r.labores||[]).forEach(ln=>{
+          const nid=normLaborId(ln.laborId,lv),lk=avKey(nid),info=laborInfo(ln.laborId,lv);
+          const l=casar(lk,r.cicloId||null);
+          const mesas=+ln.mesas||0,horas=+ln.horas||0;
+          const k=l?l.k:'np|'+lk+'|'+(r.cicloId||'');
+          let it=items.find(y=>y.k===k);
+          if(!it){it={k,l,cod:ln.laborId,desc:info?info.d:'(labor '+ln.laborId+')',mesas:0,horas:0,
+            ep:r.cicloTemporada?{temporada:r.cicloTemporada,sector:r.cicloSector||null}:null,
+            prog:!!(l&&l.dias.includes(d)),med:!!(l&&medK.has(l.k))};items.push(it)}
+          it.mesas+=mesas;it.horas+=horas;vistos.add(k);
+        })});
+        // acumulado por labor programada medible
+        items.forEach(it=>{if(it.l&&it.med){acum[it.k]=(acum[it.k]||0)+it.mesas;it.acum=acum[it.k];it.pct=M?it.acum/M*100:null;it.esp=espA(it.l,d)}});
+        // labores programadas ese día que le corresponden y no registró
+        const faltan=(aus||prestA)?[]:labs.filter(l=>l.dias.includes(d)&&medK.has(l.k)&&!vistos.has(l.k)&&(!l.cicloId||!x.eps.size||x.eps.has(l.cicloId)))
+          .map(l=>({k:l.k,l,cod:l.cod,desc:l.desc,falta:true,acum:acum[l.k]||0,pct:M?(acum[l.k]||0)/M*100:null,esp:espA(l,d),
+            ep:l.cicloId?{temporada:l.cicloTemporada,sector:l.cicloSector}:null}));
+        return {d,items,faltan,aus:aus?{tipo:tipoAusenciaDe(aus),reemp:aus.reemplazoWorkerId&&aus.reemplazoWorkerId!=='sin'?wById(aus.reemplazoWorkerId,aus.reemplazoPredioId):null}:null,prestA,sinReg:!rs.length&&!prestA};
+      });
+      return {x,celdas};
+    });
+    // equipo: mesas del día por tarea programada vs meta del día
+    const equipo=dias.map(d=>{
+      if(d>R.corte)return {d,fut:true,ts:[]};
+      const ids=new Set(G.filas.map(x=>x.w.id));
+      const rd=regsZ.filter(r=>r.fecha===d&&ids.has(r.workerId)&&!r.ausente);
+      const ts=progDia(d).filter(t=>t.laborId!=null&&t.laborId!=='').map(t=>{
+        const lk=avKey(normLaborId(+t.laborId,G.prog.lv||1)),info=laborInfo(+t.laborId,G.prog.lv||1);
+        const m=rd.filter(r=>!t.cicloId||r.cicloId===t.cicloId).reduce((s,r)=>{const lv=recLV(r);return s+(r.labores||[]).filter(ln=>avKey(normLaborId(ln.laborId,lv))===lk).reduce((ss,ln)=>ss+(+ln.mesas||0),0)},0);
+        return {cod:t.laborId,desc:info?info.d:'',meta:+t.metaMesas||0,m,ep:t.cicloId?{temporada:t.cicloTemporada,sector:t.cicloSector}:null};
+      });
+      return {d,ts};
+    });
+    return {G,dias,filas,equipo};
+  });
+}
+const AD_AUS={sin:'Ausente sin justificación',justificada:'Ausente justificado',licencia:'Licencia médica',vacaciones:'Vacaciones',retiro:'Retiro'};
+function adEpTxt(ep){return ep?`${TNAMES[ep.temporada]||'Época'}${ep.sector?' · '+ep.sector:''}`:''}
+function adEp(ep){return ep?`${TICONS[ep.temporada]||''} ${TNAMES[ep.temporada]||'Época'}${ep.sector?' · '+ep.sector:''}`:''}
+async function generarInformeAvanceDiarioHTML(){
+  try{
+    const R=await avPreparar();if(!R)return;
+    const html=buildAvanceDiarioHTML(R,calcAvanceDiario(R));
+    const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    const fn=`Arrayanes_Avance_diario_${R.wed}_corte_${R.corte}.html`;a.download=fn;
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    R.msg.textContent='✅ Descargado: '+fn+(R.sinRango.length?' · ⚠️ sin conexión: datos incompletos de '+R.sinRango.join(', '):'');
+  }catch(e){document.getElementById('infMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+async function generarInformeAvanceDiario(){
+  try{
+    const R=await avPreparar();if(!R)return;
+    const D=calcAvanceDiario(R);
+    const rows=[['Zona','Subjefe','Encargado','Mesas asignadas','Fecha','Día','Situación','Labor (cód.)','Labor','Época','Programada ese día','Mesas del día','Horas del día','Mesas acumuladas semana','% acumulado','% esperado a ese día','Estado']];
+    D.forEach(Z=>Z.filas.forEach(F=>F.celdas.forEach(c=>{
+      if(c.fut)return;
+      const base=[PREDIOS[Z.G.z].nombre,Z.G.sub,wDisplay(F.x.w),F.x.M,fDMY(c.d),adDow(c.d)];
+      const sit=c.aus?AD_AUS[c.aus.tipo]+(c.aus.reemp?' (reemplazo: '+wDisplay(c.aus.reemp)+')':''):c.prestA?'Prestado a '+c.prestA:c.sinReg?'Sin registro':'Trabajó';
+      if(!c.items.length&&!c.faltan.length){rows.push([...base,sit,'','','','','','','','','','']);return}
+      c.items.forEach(it=>rows.push([...base,sit,it.cod,it.desc,adEpTxt(it.ep),it.prog?'Sí':'No',it.mesas,it.horas,it.acum??'',it.pct==null?'':Math.round(it.pct),it.esp==null?'':Math.round(it.esp),
+        !it.l?'No programada esta semana':!it.med?'No se mide en mesas':it.pct==null?'Sin plantas en ficha':it.pct>=99.5?'Completa':it.pct>=it.esp-AV_TOL?'Al día':'Atrasado']));
+      c.faltan.forEach(it=>rows.push([...base,sit,it.cod,it.desc,adEpTxt(it.ep),'Sí',0,0,it.acum,it.pct==null?'':Math.round(it.pct),Math.round(it.esp),'Programada, sin registro ese día']));
+    })));
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(rows),'Avance diario');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetAvanceResumen(R)),'Avance por encargado');
+    XLSX.utils.book_append_sheet(wb,aoaToSheet(buildSheetAvanceCriterios(R)),'Criterios avance');
+    const fn=`Arrayanes_Avance_diario_${R.wed}_corte_${R.corte}.xlsx`;
+    descargarXLSX(wb,fn);
+    R.msg.textContent='✅ Descargado: '+fn+(R.sinRango.length?' · ⚠️ sin conexión: datos incompletos de '+R.sinRango.join(', '):'');
+  }catch(e){document.getElementById('infMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+}
+function buildAvanceDiarioHTML(R,D){
+  const esc=dbEsc,ppm=plantasPorMesa();
+  const pctTxt=p=>p==null?'—':Math.round(p)+'%';
+  const item=it=>{
+    const ep=it.ep?` <span class="ep">${esc(adEp(it.ep))}</span>`:'';
+    const nom=`<b>${esc(it.cod)}</b> ${esc(it.desc.length>20?it.desc.slice(0,19)+'…':it.desc)}${ep}`;
+    if(it.falta)return `<div class="it falta" title="Programada este día y sin registro">${nom}<div class="ln"><span>0 mesas</span><span class="p" style="color:${avColor(it.pct,it.esp)}">${pctTxt(it.pct)} <span class="sm">esp. ${Math.round(it.esp)}%</span></span></div></div>`;
+    if(!it.l||!it.med)return `<div class="it np" title="${!it.l?'No programada esta semana':'No se mide en mesas'}">${nom}<div class="ln"><span>${it.mesas?it.mesas+' mesas':''}${it.horas?(it.mesas?' · ':'')+it.horas+' h':''}</span><span class="sm">${!it.l?'no programada':'en horas'}</span></div></div>`;
+    const c=avColor(it.pct,it.esp),ok=it.pct!=null&&it.pct>=99.5;
+    return `<div class="it${it.prog?'':' fuera'}" title="${it.prog?'':'Hecha en un día no programado para esta labor'}">${nom}<div class="ln"><span>${it.mesas} mesas${it.horas?' · '+it.horas+' h':''}</span><span class="p" style="color:${c}">${pctTxt(it.pct)}${ok?' ✓':it.pct!=null&&it.pct<it.esp-AV_TOL?' ⚠':''}</span></div>
+      <div class="mb"><div style="width:${Math.min(100,it.pct||0)}%;background:${c}"></div>${it.esp<100?`<i style="left:${it.esp}%"></i>`:''}</div></div>`;
+  };
+  const cards=D.map(Z=>{
+    const G=Z.G,zn=PREDIOS[G.z].nombre;
+    const titulo=`${esc(zn)} · ${esc(G.sub)} · ${G.filas.length} encargados`;
+    if(G.err)return `<div class="card"><h2>${titulo}</h2><div class="warn">No se pudo leer la programación: ${esc(G.err)}</div></div>`;
+    const sinProg=!G.prog?`<div class="warn">Sin programación para la semana del ${fDMY(R.wed)}: se muestran las mesas, pero sin % de avance.</div>`:'';
+    const ths=Z.dias.map(d=>`<th class="dc${d===todayIso?' hoy':''}">${adDow(d)}<div class="sm">${fDMY(d).slice(0,5)}</div></th>`).join('');
+    const filas=Z.filas.map(F=>{const x=F.x;
+      const tds=F.celdas.map(c=>{
+        if(c.fut)return `<td class="dc fut">—</td>`;
+        let h='';
+        if(c.aus)h+=`<div class="tag aus">${esc(AD_AUS[c.aus.tipo]||'Ausente')}${c.aus.reemp?`<div class="sm">reemplazo: ${esc(wDisplay(c.aus.reemp))}</div>`:''}</div>`;
+        if(c.prestA)h+=`<div class="tag pre">Prestado a ${esc(c.prestA)}</div>`;
+        h+=c.items.map(item).join('')+c.faltan.map(item).join('');
+        if(c.sinReg&&!c.faltan.length)h+=`<div class="tag sr">Sin registro</div>`;
+        return `<td class="dc${c.d===todayIso?' hoy':''}">${h}</td>`}).join('');
+      return `<tr><td class="enc"><b>${esc(wDisplay(x.w))}</b><div class="sm">${x.M?'≈'+x.M+' mesas':'sin plantas en ficha'}</div></td>${tds}
+        <td class="c tot" style="color:${avColor(x.pct,x.esp)}">${avFmt(x.pct)}<div class="sm">esp. ${avFmt(x.esp)}</div><div class="sm">${esc(x.estado)}</div></td></tr>`}).join('');
+    const eq=G.prog?`<tr class="eq"><td class="enc"><b>Equipo</b><div class="sm">mesas del día vs meta programada</div></td>${Z.equipo.map(e=>e.fut?`<td class="dc fut">—</td>`:`<td class="dc">${e.ts.map(t=>`<div class="sm"><b>${esc(t.cod)}</b> ${esc(t.desc.length>16?t.desc.slice(0,15)+'…':t.desc)}${t.ep?' '+esc(adEp(t.ep)):''}: <b>${t.m}</b>${t.meta?' / '+t.meta+` <span style="color:${avColor(t.m/t.meta*100,100)}">(${Math.round(t.m/t.meta*100)}%)</span>`:''}</div>`).join('')||'<div class="sm">—</div>'}</td>`).join('')}<td class="c tot" style="color:${avColor(G.pct,G.esp)}">${avFmt(G.pct)}<div class="sm">esp. ${avFmt(G.esp)}</div></td></tr>`:'';
+    return `<div class="card"><h2>${titulo}</h2>${sinProg}<div class="tw"><table><thead><tr><th>Encargado</th>${ths}<th class="c">Semana</th></tr></thead><tbody>${filas}${eq}</tbody></table></div></div>`;
+  }).join('');
+  return '<!DOCTYPE html>'+`<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Avance diario ${R.wed} corte ${R.corte}</title><style>
+body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#F8F5EF;color:#2A2A2A;margin:0;padding:0 0 40px}
+.hdr{background:#1A2E1F;color:#B7E4C7;padding:22px 18px}.hdr h1{margin:0;font-size:20px}.hdr p{margin:5px 0 0;font-size:12px;color:#74C69D}
+.wrap{max-width:1500px;margin:0 auto;padding:0 14px}
+.card{background:#fff;border-radius:14px;padding:14px;margin:12px 0;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.card h2{font-size:13px;margin:0 0 10px;color:#1A2E1F;text-transform:uppercase;letter-spacing:.5px}
+.tw{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:12px;min-width:900px}
+th{text-align:left;font-size:10px;text-transform:uppercase;color:#7A7A7A;border-bottom:2px solid #E9E3D7;padding:6px;vertical-align:bottom;position:sticky;top:0;background:#fff}
+td{border-bottom:1px solid #F0EBE1;padding:6px;vertical-align:top}
+.enc{min-width:150px;position:sticky;left:0;background:#fff;z-index:1}.dc{min-width:130px}.dc.hoy{background:#F2FAF4}.fut{color:#C8C8C8;text-align:center}
+.c{text-align:center}.tot{font-family:Menlo,Consolas,monospace;font-size:14px;font-weight:700;min-width:80px}
+.sm{font-size:10px;color:#7A7A7A;font-weight:400;text-transform:none}
+.it{border-radius:7px;background:#F6F8F6;padding:4px 6px;margin-bottom:4px;font-size:11px;line-height:1.3}
+.it.fuera{background:#F1F5FB}.it.np{background:#F4F2EE;color:#6A6A6A}.it.falta{background:#FDECEC;border:1px dashed #E5A3A3}
+.ln{display:flex;justify-content:space-between;gap:6px;margin-top:2px}.p{font-family:Menlo,Consolas,monospace;font-weight:700}
+.mb{position:relative;height:5px;background:#E4E1DA;border-radius:3px;margin-top:3px}.mb div{height:100%;border-radius:3px}.mb i{position:absolute;top:-2px;bottom:-2px;width:2px;background:#1A2E1F}
+.ep{font-size:10px;color:#5B4A00}
+.tag{border-radius:7px;padding:4px 6px;font-size:11px;margin-bottom:4px}.aus{background:#FDE2E1;color:#9B2226}.pre{background:#EAF4FB;color:#0369A1}.sr{background:#F4F2EE;color:#9A9A9A}
+tr.eq td{background:#FAF8F3;border-top:2px solid #E9E3D7}
+.warn{background:#FFF8E6;border-left:3px solid #D4A017;border-radius:6px;padding:8px 10px;font-size:12px;margin:6px 0}
+.note{font-size:12px;line-height:1.55;color:#444}.note li{margin-bottom:4px}
+.ley{display:flex;flex-wrap:wrap;gap:6px;font-size:11px}.ley span{border-radius:6px;padding:3px 7px}
+</style></head><body>
+<div class="hdr"><h1>📅 Avance diario por encargado</h1>
+<p>Semana ${fDMY(R.wed)} (mié) → ${fDMY(R.dias[4])} (mar) · Corte: ${fD(R.corte)}${R.hastaPedido>R.corte?' (hoy)':''} · ${ppm} plantas por mesa · Generado ${new Date().toLocaleString('es-CL')}</p></div>
+<div class="wrap">
+${R.sinRango.length?`<div class="warn">⚠️ Sin conexión para leer la semana completa de: ${esc(R.sinRango.join(', '))}. Datos incompletos.</div>`:''}
+<div class="card"><h2>Cómo leerlo</h2><div class="ley">
+<span style="background:#F6F8F6">Labor programada: mesas del día · <b>% acumulado</b> de la pasada (barra; la raya = esperado a ese día)</span>
+<span style="background:#F1F5FB">Hecha en un día no programado para esa labor</span>
+<span style="background:#FDECEC;border:1px dashed #E5A3A3">Programada ese día y sin registro</span>
+<span style="background:#F4F2EE">No programada esta semana / labor en horas</span>
+<span style="background:#FDE2E1">Ausente</span><span style="background:#EAF4FB">Prestado a otra zona</span></div>
+<ul class="note">
+<li><b>% acumulado</b> = mesas registradas por el encargado en esa labor desde el miércoles hasta ese día ÷ sus mesas asignadas (plantas de la ficha ÷ ${ppm}). Cada labor programada = una pasada por todas sus mesas.</li>
+<li><b>Esperado a ese día</b> = días programados de la labor hasta ese día ÷ días programados. ✓ = pasada completa · ⚠ = más de ${AV_TOL} puntos bajo lo esperado.</li>
+<li>Con épocas (Verano / Primor) cada labor se mide por separado y solo cuentan las mesas registradas en esa época. Si la tarea programada no tiene época, cuentan las mesas de cualquier época.</li>
+<li>Columna <b>Semana</b>: mismo cálculo que el informe "Avance semanal por encargado". Fila <b>Equipo</b>: mesas del día de todo el equipo por tarea vs la meta de mesas programada ese día.</li>
+</ul></div>
+${cards}
+</div></body></html>`;
 }
 
 function aoaToSheet(rows){
