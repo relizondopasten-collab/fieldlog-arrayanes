@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-11-18-3';
+const APP_V = '2026-11-19-2';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -345,9 +345,9 @@ select:focus,input:focus{border-color:var(--green)}
     <div class="nav">
       <button class="nb active" onclick="showScr('registro',this)">Registrar</button>
       <button class="nb"        onclick="showScr('prog',this)">Prog.</button>
-      <button class="nb"        onclick="showScr('avance',this)">Avance</button>
+      <button class="nb"        onclick="showScr('informes',this)">Avance</button>
       <button class="nb"        onclick="showScr('ciclos',this)">Ciclos</button>
-      <button class="nb" id="navInformes" style="display:none" onclick="showScr('informes',this)">Informes</button>
+      <button class="nb" id="navInformes" style="display:none" data-oculto="1" onclick="showScr('informes',this)">Informes</button><!-- 2026-11-19: la pestaña Avance abre esta pantalla; el antiguo 'Avance' (horas/mesas del día) quedó sin acceso -->
       <button class="nb"        onclick="showScr('config',this)">Config</button>
     </div>
   </div>
@@ -491,6 +491,25 @@ select:focus,input:focus{border-color:var(--green)}
   <!-- INFORMES (admin only) -->
   <div id="screen-informes" class="screen">
     <div style="height:10px"></div>
+    <!-- 2026-11-19: vista simplificada. Avance de lo registrado vs la programación semanal, dentro de la app. -->
+    <div class="card" style="padding:12px 14px">
+      <div class="card-title">📅 Avance vs programación</div>
+      <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px">Lo registrado cada día por encargado, comparado con la programación de la semana (mié → mar). Primor y Verano se miden por separado.</p>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <button class="btn btn-secondary" id="avPrev" onclick="avMoverSemana(-1)" style="width:auto;padding:8px 14px;margin:0">‹</button>
+        <div id="avSemLbl" style="flex:1;text-align:center;font-size:13px;font-weight:600"></div>
+        <button class="btn btn-secondary" id="avNext" onclick="avMoverSemana(1)" style="width:auto;padding:8px 14px;margin:0">›</button>
+      </div>
+      <div class="form-row" style="margin-bottom:10px"><label>Zona / subjefe</label><select id="avSel" onchange="avRender()"></select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <button class="btn btn-secondary" onclick="generarInformeAvanceDiario()" style="font-size:11px;padding:8px;margin:0">📥 Descargar Excel</button>
+        <button class="btn btn-secondary" onclick="generarInformeAvanceDiarioHTML()" style="font-size:11px;padding:8px;margin:0">📤 Descargar para compartir (HTML)</button>
+      </div>
+      <div id="avMsg" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+    </div>
+    <div id="avView" style="margin:0 0 20px"></div>
+    <!-- Informes anteriores: escondidos (no borrados) para reactivarlos más adelante -->
+    <div id="infOtros" style="display:none">
     <div class="card" style="padding:12px 14px">
       <div class="card-title">📊 Informes</div>
       <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px">Descarga reportes en Excel con la información del periodo seleccionado.</p>
@@ -523,6 +542,7 @@ select:focus,input:focus{border-color:var(--green)}
       <div id="infMsg" style="margin-top:10px;font-size:11px;color:var(--muted)"></div>
     </div>
     <div id="infCharts"></div>
+    </div>
   </div>
 
   <!-- CONFIG -->
@@ -1171,7 +1191,6 @@ function applyRoleUI(){
   document.getElementById('costCard').style.display=isAdmin()?'block':'none';
   document.getElementById('clearDataBtn').style.display=isAdmin()?'block':'none';
   document.getElementById('addWBtn').style.display='block';
-  document.getElementById('navInformes').style.display='inline-flex';
 }
 
 // ══════════════════════════════════════════════
@@ -2561,7 +2580,9 @@ function openModalNuevaProg(subjefe,mondayIso){
     ${progDays[4]<=todayIso?`<div style="background:#FFF4E5;border:1px solid #F4A261;border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:10px">⚠️ Esta semana ${progDays[4]===todayIso?'termina hoy':'ya terminó'}. Si vas a programar la semana que viene, cierra y avanza con ›.</div>`:''}
     <div id="progSaveStatus" style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);margin:-4px 0 10px;min-height:14px">Autoguardado activo</div>
     <div id="progModalDias"></div>
-    <button class="btn btn-primary" onclick="saveProgModal()">Guardar programación</button>`;
+    <button class="btn btn-primary" onclick="saveProgModal()">Guardar programación</button>
+    <button class="btn btn-secondary" onclick="progVerListar()" style="margin-top:6px;font-size:12px">🕘 Versiones anteriores</button>
+    <div id="progVerBox"></div>`;
   document.getElementById('progModalDias').innerHTML='<div class="empty" style="padding:18px">Cargando programación…</div>';
   const ed=window._progEdit;
   const draft=progDraftGet(ed.predioId,subjefe,mondayIso);
@@ -2571,6 +2592,8 @@ function openModalNuevaProg(subjefe,mondayIso){
     if(window._progEdit!==ed)return;
     const data=snap.exists?snap.data():null;
     ed.creadoTs=data&&!data.movidoA?(data.creadoTs||data.ts||null):null;
+    ed.baseTs=data?(data.ts||0):0;
+    if(data&&!data.movidoA)progGuardarVersion(ed.predioId,subjefe,mondayIso,data,'al abrir para editar',true);
     let recuperado=false;
     if(draft&&(!data||(draft.ts||0)>(data.ts||0))){usarBorrador();recuperado=true;}
     else{
@@ -2672,15 +2695,49 @@ function progMarkDirty(){
   clearTimeout(ed.timer);
   ed.timer=setTimeout(()=>progAutoSave(ed),PROG_AUTOSAVE_MS);
 }
-function progWrite(pid,sub,mon,dias,creadoTs){
-  // Sin caché offline, set() queda esperando hasta que vuelva la red: se limita la espera a 12 s
-  // creadoTs (2026-11-18): fecha en que se creó la programación. ts cambia con cada autoguardado y no sirve
-  // para saber si se programó el martes para la semana siguiente (progPrevParaEstaSemana).
+// ── Protección de la programación (2026-11-19) ──
+// 1) Antes de cada guardado se lee lo que hay en Firebase y se guarda una copia en .../semanas/{wed}/versiones/{ts}
+//    (al abrir, cada 15 min de edición, y siempre que se borren tareas o se reemplace el trabajo de otra persona).
+// 2) No se guarda automáticamente una programación vacía encima de una con tareas.
+// 3) Si otra persona guardó después de que abriste, el autoguardado no la pisa (pide confirmar).
+const PROG_VER_MIN=15*60*1000,progVerUlt={};
+function progVerCol(pid,sub,mon){return colProg(pid,sub).doc(mon).collection('versiones')}
+function progNTareas(d){return Object.values(d||{}).reduce((a,v)=>a+((v||[]).filter(t=>t&&t.laborId!=null&&t.laborId!=='').length),0)}
+async function progGuardarVersion(pid,sub,mon,data,motivo,forzar){
+  if(!data||!progNTareas(data.dias))return;
+  const k=pid+'|'+sub+'|'+mon,u=progVerUlt[k];
+  if(u&&u.ts===data.ts)return;                                   // esa versión ya está copiada
+  if(!forzar&&u&&Date.now()-u.at<PROG_VER_MIN)return;           // máx. una copia cada 15 min mientras se edita
+  try{
+    await progVerCol(pid,sub,mon).doc(String(data.ts||Date.now())).set({...data,versionGuardada:Date.now(),motivo:motivo||'',guardadaPor:currentUser?currentUser.uid:''});
+    progVerUlt[k]={ts:data.ts,at:Date.now()};
+  }catch(e){console.warn('progGuardarVersion',e)}
+}
+async function progWrite(pid,sub,mon,dias,creadoTs,opt){
+  // Sin caché offline, get()/set() quedan esperando hasta que vuelva la red: se limita la espera a 12 s
+  // creadoTs (2026-11-18): fecha en que se creó la programación (ts cambia con cada autoguardado).
+  // opt: {baseTs: ts de lo cargado/guardado en esta edición (null = no revisar), forzar, forzarVersion, motivo}
+  opt=opt||{};
+  const tmo=p=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000))]);
+  const ref=colProg(pid,sub).doc(mon);
+  const snap=await tmo(ref.get());
+  const srv=snap.exists?snap.data():null;
+  const nSrv=srv&&!srv.movidoA?progNTareas(srv.dias):0,nNew=progNTareas(dias);
+  const ajeno=!!(srv&&opt.baseTs!=null&&(srv.ts||0)>opt.baseTs);
+  if(!opt.forzar){
+    if(nSrv&&!nNew){const e=new Error('vaciar');e.nSrv=nSrv;throw e}
+    if(ajeno&&nSrv){const e=new Error('conflicto');e.srv=srv;throw e}
+  }
+  if(nSrv)await progGuardarVersion(pid,sub,mon,srv,opt.motivo||(ajeno?'antes de reemplazar cambios de otra persona':nNew<nSrv?'antes de quitar tareas':'antes de guardar'),opt.forzar||opt.forzarVersion||nNew<nSrv||ajeno);
   const doc={semana:mon,dias,lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid};
   if(creadoTs)doc.creadoTs=creadoTs;
-  const w=colProg(pid,sub).doc(mon).set(doc);
-  const t=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000));
-  return Promise.race([w,t]);
+  await tmo(ref.set(doc));
+  return doc.ts;
+}
+function progErrTxt(e){
+  if(e.message==='vaciar')return `⚠️ No se guardó: quedaría vacía y la guardada tiene ${e.nSrv} tarea(s). Toca "Guardar programación" para confirmar.`;
+  if(e.message==='conflicto')return `⚠️ Otra persona guardó cambios a las ${new Date(e.srv.ts).toTimeString().slice(0,5)}. No se pisaron: cierra y vuelve a abrir para verlos, o toca "Guardar programación" para reemplazarlos.`;
+  return null;
 }
 async function progAutoSave(ed){
   ed=ed||window._progEdit;if(!ed||!ed.loaded)return false;
@@ -2693,22 +2750,56 @@ async function progAutoSave(ed){
   let ok=false;
   try{
     if(ed.creadoTs===null)ed.creadoTs=Date.now();
-    await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,JSON.parse(JSON.stringify(ed.dias)),ed.creadoTs);
+    const fv=ed.forzarVersion;ed.forzarVersion=false;
+    ed.baseTs=await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,JSON.parse(JSON.stringify(ed.dias)),ed.creadoTs,{baseTs:ed.baseTs,forzarVersion:fv,motivo:fv?'antes de restaurar una versión':''});
     ed.savedRev=rev;ok=true;
     if(ed.rev===rev){ed.dirty=false;progDraftDel(ed.predioId,ed.subjefe,ed.mondayIso);progSetStatus('✓ Guardado '+progHora(),'var(--green)');}
   }catch(e){
-    progSetStatus(e.message==='timeout'?'⚠️ Sin señal — se reintentará; borrador en el teléfono':'⚠️ No se pudo guardar: '+e.message,'#B5651D');
-    if(ed.open){clearTimeout(ed.timer);ed.timer=setTimeout(()=>progAutoSave(ed),20000);}
+    const bloq=progErrTxt(e);
+    if(bloq){progDraftSet(ed);progSetStatus(bloq,'var(--red)');ed.bloqueado=true;}
+    else{
+      progSetStatus(e.message==='timeout'?'⚠️ Sin señal — se reintentará; borrador en el teléfono':'⚠️ No se pudo guardar: '+e.message,'#B5651D');
+      if(ed.open){clearTimeout(ed.timer);ed.timer=setTimeout(()=>progAutoSave(ed),20000);}
+    }
   }
   ed.saving=false;
+  if(ed.bloqueado&&!ok){ed.pendingAfter=false;return false;}
   if(ed.rev!==ed.savedRev&&(ed.pendingAfter||ok)){ed.pendingAfter=false;clearTimeout(ed.timer);ed.timer=setTimeout(()=>progAutoSave(ed),PROG_AUTOSAVE_MS);}
   return ok;
 }
+async function progVerListar(){
+  const ed=window._progEdit;const box=document.getElementById('progVerBox');if(!ed||!box)return;
+  box.innerHTML='<div class="empty" style="padding:10px">Cargando versiones…</div>';
+  try{
+    const qs=await Promise.race([progVerCol(ed.predioId,ed.subjefe,ed.mondayIso).get(),new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),12000))]);
+    const vs=qs.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,30);
+    window._progVers=vs;
+    if(!vs.length){box.innerHTML='<div style="font-size:12px;color:var(--muted);padding:8px 2px">Aún no hay versiones guardadas de esta semana.</div>';return}
+    box.innerHTML='<div style="font-size:11px;color:var(--muted);margin:10px 0 4px">Copias guardadas (fecha y hora en que se guardó esa versión)</div>'+vs.map((v,i)=>{
+      const f=new Date(v.ts||+v.id);
+      return `<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;padding:6px 8px;margin-bottom:4px;font-size:12px">
+        <div style="flex:1"><b>${fDMY(f.toISOString().slice(0,10))} ${f.toTimeString().slice(0,5)}</b> · ${progNTareas(v.dias)} tarea(s)<div style="font-size:10px;color:var(--muted)">copia ${dbEsc(v.motivo||'')}</div></div>
+        <button class="btn btn-secondary" style="width:auto;margin:0;padding:6px 10px;font-size:11px" onclick="progVerRestaurar(${i})">Restaurar</button></div>`}).join('');
+  }catch(e){box.innerHTML=`<div style="font-size:12px;color:var(--red);padding:8px 2px">No se pudieron leer las versiones: ${dbEsc(e.message)}</div>`}
+}
+function progVerRestaurar(i){
+  const ed=window._progEdit,v=(window._progVers||[])[i];if(!ed||!v)return;
+  if(!ed.loaded){toast('Espera a que cargue la programación');return}
+  const f=new Date(v.ts||+v.id);
+  if(!confirm(`¿Restaurar la versión del ${fDMY(f.toISOString().slice(0,10))} ${f.toTimeString().slice(0,5)} (${progNTareas(v.dias)} tareas)?\n\nLo que hay ahora queda guardado en Versiones anteriores.`))return;
+  const days=getProgDays(ed.mondayIso),dayNames=['Miércoles','Jueves','Viernes','Lunes','Martes'];
+  days.forEach(iso=>{ed.dias[iso]=JSON.parse(JSON.stringify((v.dias||{})[iso]||[]))});
+  ed.forzarVersion=true;ed.bloqueado=false;
+  renderProgModalDias(days,dayNames);progMarkDirty();
+  document.getElementById('progVerBox').innerHTML='';
+  toast('🕘 Versión restaurada — se está guardando');
+}
+
 function progFlushOnClose(){
   const ed=window._progEdit;if(!ed||!ed.open)return;
   ed.open=false;
   if(ed.rev!==ed.savedRev){
-    progAutoSave(ed).then(ok=>{toast(ok?'✅ Programación guardada':'📝 Sin conexión: la programación quedó en el teléfono y se subirá al volver la señal');});
+    progAutoSave(ed).then(ok=>{toast(ok?'✅ Programación guardada':ed.bloqueado?'⚠️ No se guardaron tus últimos cambios para no pisar la programación (quedaron en el teléfono)':'📝 Sin conexión: la programación quedó en el teléfono y se subirá al volver la señal');});
   }
 }
 async function saveProgModal(){
@@ -2718,7 +2809,23 @@ async function saveProgModal(){
   loading(true,'Guardando programación…');
   try{
     if(ed.creadoTs===null)ed.creadoTs=Date.now();
-    await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,JSON.parse(JSON.stringify(ed.dias)),ed.creadoTs);
+    const dias=JSON.parse(JSON.stringify(ed.dias));
+    let ts;
+    try{ts=await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,dias,ed.creadoTs,{baseTs:ed.baseTs,forzarVersion:ed.forzarVersion})}
+    catch(e){
+      const q=e.message==='vaciar'?`La programación guardada tiene ${e.nSrv} tarea(s) y la vas a dejar VACÍA.
+
+¿Seguro? (la anterior queda en "Versiones anteriores")`
+             :e.message==='conflicto'?`Otra persona guardó cambios en esta programación a las ${new Date(e.srv.ts).toTimeString().slice(0,5)}, después de que la abriste.
+
+¿Reemplazarla con la tuya? (la de esa persona queda en "Versiones anteriores")`:null;
+      if(!q)throw e;
+      loading(false);
+      if(!confirm(q)){progDraftSet(ed);return;}
+      loading(true,'Guardando programación…');
+      ts=await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,dias,ed.creadoTs,{forzar:true,baseTs:ed.baseTs});
+    }
+    ed.baseTs=ts;ed.bloqueado=false;ed.forzarVersion=false;
     ed.savedRev=ed.rev;ed.dirty=false;
     progDraftDel(ed.predioId,ed.subjefe,ed.mondayIso);
     closeModal();renderProg();toast('✅ Programación guardada');
@@ -4238,14 +4345,15 @@ function calcAvanceSemanal(regsPorZona,progs,wed,corte){
   });
   return out;
 }
-async function avPreparar(){
-  const hasta=document.getElementById('infHasta').value;
+async function avPreparar(opt){
+  // opt (2026-11-19, pantalla Avance): {hasta, z, sub, msgId}. Sin opt: filtros de la pantalla de informes antigua.
+  const hasta=opt?opt.hasta:document.getElementById('infHasta').value;
   if(!hasta){toast('⚠️ Selecciona la fecha Hasta (fecha de corte)');return null}
   const corte=hasta>todayIso?todayIso:hasta;
   const wed=progMiercolesDe(corte);
-  const subF=document.getElementById('infSubjefe').value;
-  const zonas=subF?[activePred]:PRED_ORDER;
-  const msg=document.getElementById('infMsg');msg.textContent='⏳ Leyendo programación y registros de la semana…';
+  const subF=opt?(opt.sub||''):document.getElementById('infSubjefe').value;
+  const zonas=opt?(opt.z?[opt.z]:PRED_ORDER):(subF?[activePred]:PRED_ORDER);
+  const msg=document.getElementById(opt&&opt.msgId||'infMsg');msg.textContent='⏳ Leyendo programación y registros de la semana…';
   const desdeHist=avIsoMas(wed,-AV_LOOKBACK_DIAS);
   const regsPorZona={},sinRango=[];
   for(const z of zonas){const r=await avRegsZona(z,desdeHist,corte);regsPorZona[z]=r.regs;if(!r.ok)sinRango.push(PREDIOS[z].nombre)}
@@ -4451,18 +4559,18 @@ function adEpTxt(ep){return ep?`${TNAMES[ep.temporada]||'Época'}${ep.sector?' �
 function adEp(ep){return ep?`${TICONS[ep.temporada]||''} ${TNAMES[ep.temporada]||'Época'}${ep.sector?' · '+ep.sector:''}`:''}
 async function generarInformeAvanceDiarioHTML(){
   try{
-    const R=await avPreparar();if(!R)return;
+    const R=await avPreparar(avOpt());if(!R)return;
     const html=buildAvanceDiarioHTML(R,calcAvanceDiario(R));
     const blob=new Blob([html],{type:'text/html;charset=utf-8'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);
     const fn=`Arrayanes_Avance_diario_${R.wed}_corte_${R.corte}.html`;a.download=fn;
     document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
     R.msg.textContent='✅ Descargado: '+fn+(R.sinRango.length?' · ⚠️ sin conexión: datos incompletos de '+R.sinRango.join(', '):'');
-  }catch(e){document.getElementById('infMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+  }catch(e){document.getElementById('avMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
 }
 async function generarInformeAvanceDiario(){
   try{
-    const R=await avPreparar();if(!R)return;
+    const R=await avPreparar(avOpt());if(!R)return;
     const D=calcAvanceDiario(R);
     const rows=[['Zona','Subjefe','Encargado','Mesas asignadas','Fecha','Día','Situación','Labor (cód.)','Labor','Época','Programada ese día','Mesas del día','Horas del día','Mesas acumuladas semana','% acumulado','% esperado a ese día','Estado']];
     D.forEach(Z=>Z.filas.forEach(F=>F.celdas.forEach(c=>{
@@ -4481,7 +4589,7 @@ async function generarInformeAvanceDiario(){
     const fn=`Arrayanes_Avance_diario_${R.wed}_corte_${R.corte}.xlsx`;
     descargarXLSX(wb,fn);
     R.msg.textContent='✅ Descargado: '+fn+(R.sinRango.length?' · ⚠️ sin conexión: datos incompletos de '+R.sinRango.join(', '):'');
-  }catch(e){document.getElementById('infMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
+  }catch(e){document.getElementById('avMsg').textContent='❌ Error: '+e.message;toast('Error: '+e.message)}
 }
 function buildAvanceDiarioHTML(R,D){
   const esc=dbEsc,ppm=plantasPorMesa();
@@ -4557,6 +4665,46 @@ ${R.sinRango.length?`<div class="warn">⚠️ Sin conexión para leer la semana 
 </ul></div>
 ${cards}
 </div></body></html>`;
+}
+
+// ── Pantalla "Avance" (2026-11-19): avance diario vs programación dentro de la app ──
+let avWeekOff=0,avTok=0;
+function avSemana(){
+  const wed=avIsoMas(progMiercolesDe(todayIso),7*avWeekOff),tue=avIsoMas(wed,6);
+  return {wed,tue,corte:tue<todayIso?tue:todayIso};
+}
+function avOpt(){
+  const v=(document.getElementById('avSel')||{}).value||'';
+  const [z,sub]=v?v.split('|'):['',''];
+  return {hasta:avSemana().corte,z:z||'',sub:sub||'',msgId:'avMsg'};
+}
+function avInitSel(){
+  const sel=document.getElementById('avSel');if(!sel)return;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">— Todas las zonas —</option>'+PRED_ORDER.map(z=>(PREDIOS[z].subjefes||[]).map(sub=>
+    `<option value="${z}|${dbEsc(sub)}">${dbEsc(PREDIOS[z].nombre)} · ${dbEsc(sub)}</option>`).join('')).join('');
+  if(cur&&[...sel.options].some(o=>o.value===cur))sel.value=cur;
+}
+function avMoverSemana(d){avWeekOff=Math.min(0,avWeekOff+d);avRender()}
+async function avRender(){
+  const S=avSemana();
+  const lbl=document.getElementById('avSemLbl');if(!lbl)return;
+  lbl.textContent=`Mié ${fDMY(S.wed).slice(0,5)} → Mar ${fDMY(S.tue).slice(0,5)}${avWeekOff===0?' · esta semana':''}`;
+  document.getElementById('avNext').disabled=avWeekOff>=0;
+  const tok=++avTok,view=document.getElementById('avView');
+  view.innerHTML='<div class="empty" style="padding:18px">⏳ Cargando avance…</div>';
+  try{
+    const R=await avPreparar(avOpt());
+    if(tok!==avTok)return;
+    if(!R){view.innerHTML='';return}
+    const html=buildAvanceDiarioHTML(R,calcAvanceDiario(R));
+    const fr=document.createElement('iframe');
+    fr.style.cssText='width:100%;border:0;border-radius:14px;background:#F8F5EF;min-height:300px;display:block';
+    fr.onload=()=>{try{const h=()=>{fr.style.height=(fr.contentDocument.documentElement.scrollHeight+4)+'px'};h();setTimeout(h,300)}catch(e){fr.style.height='80vh'}};
+    fr.srcdoc=html;
+    view.innerHTML='';view.appendChild(fr);
+    R.msg.textContent=R.sinRango.length?'⚠️ Sin conexión: datos incompletos de '+R.sinRango.join(', '):'Actualizado '+progHora();
+  }catch(e){if(tok!==avTok)return;view.innerHTML='';document.getElementById('avMsg').textContent='❌ Error: '+e.message}
 }
 
 function aoaToSheet(rows){
@@ -4914,7 +5062,7 @@ function showScr(name,btn){
   if(name==='ciclos')  renderCiclos();
   if(name==='config')  renderConfig();
   if(name==='prog')    {populateProgSubjefe();renderProg();}
-  if(name==='informes'){initInformes();}
+  if(name==='informes'){initInformes();avInitSel();avRender();}
   // Limpiar listener de programación al salir de esa pantalla
   if(name!=='prog'&&progListener){progListener();progListener=null;}
 }
