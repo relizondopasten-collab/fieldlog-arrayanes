@@ -35,7 +35,7 @@ const FIREBASE_CONFIG = {
      poner el mismo valor en el archivo version.json
 ══════════════════════════════════════════ -->
 <script>
-const APP_V = '2026-11-18-2';
+const APP_V = '2026-11-18-3';
 
 function flAviso(msg){ try{ toast(msg) }catch(e){ alert(msg) } }
 
@@ -2390,9 +2390,10 @@ async function progPrevParaEstaSemana(pid,sub,wedIso){
   const x=snap.data()||{};
   if(x.movidoA||!x.dias)return null;
   const n=Object.values(x.dias).reduce((a,v)=>a+((v||[]).length),0);
-  if(!n||!x.ts)return null;
+  const creado=x.creadoTs||x.ts;   // 2026-11-18: fecha de creación; las antiguas sin creadoTs usan el último guardado
+  if(!n||!creado)return null;
   const ultimo=getProgDays(prevIso)[4];                 // martes en que termina esa semana
-  const t=new Date(x.ts);t.setHours(12,0,0,0);
+  const t=new Date(creado);t.setHours(12,0,0,0);
   if(t.toISOString().slice(0,10)<ultimo)return null;   // hecha antes del martes: es de esa semana
   return {prevIso,data:x,n,ts:x.ts};
 }
@@ -2413,7 +2414,7 @@ async function progTraerAnterior(subjefe,destIso,prevIso){
     const src=await colProg(activePred,subjefe).doc(prevIso).get();
     if(!src.exists){loading(false);return;}
     const x=src.data();
-    await colProg(activePred,subjefe).doc(destIso).set({semana:destIso,dias:progRemapDias(x.dias,prevIso,destIso),lv:recLV(x),ts:x.ts||Date.now(),creadoPor:x.creadoPor||currentUser.uid,traidaDe:subjefe+'|'+prevIso});
+    await colProg(activePred,subjefe).doc(destIso).set({semana:destIso,dias:progRemapDias(x.dias,prevIso,destIso),lv:recLV(x),ts:x.ts||Date.now(),creadoTs:x.creadoTs||x.ts||Date.now(),creadoPor:x.creadoPor||currentUser.uid,traidaDe:subjefe+'|'+prevIso});
     await colProg(activePred,subjefe).doc(prevIso).update({movidoA:destIso,movidoPor:currentUser.uid,movidoTs:Date.now()});
     loading(false);toast('✅ Programación pasada a esta semana');
   }catch(e){loading(false);toast('Error: '+e.message);}
@@ -2541,7 +2542,7 @@ async function progTraer(i,subjefe,destIso){
     }
     // si el documento está desfasado, sus días vienen de getProgDays(r.id); si no, de su miércoles
     const dias=progRemapDias(r.dias,r.id,destIso);
-    await colProg(activePred,subjefe).doc(destIso).set({semana:destIso,dias,lv:r.lv,ts:Date.now(),creadoPor:currentUser.uid,traidaDe:r.sub+'|'+r.id});
+    await colProg(activePred,subjefe).doc(destIso).set({semana:destIso,dias,lv:r.lv,ts:Date.now(),creadoTs:Date.now(),creadoPor:currentUser.uid,traidaDe:r.sub+'|'+r.id});
     if(mover&&!(r.sub===subjefe&&r.id===destIso))await colProg(activePred,r.sub).doc(r.id).update({movidoA:destIso,movidoPor:currentUser.uid,movidoTs:Date.now()});
     loading(false);closeModal();
     toast('✅ Programación traída a la semana del '+fDMY(destIso));
@@ -2569,6 +2570,7 @@ function openModalNuevaProg(subjefe,mondayIso){
   colProg(activePred,subjefe).doc(mondayIso).get().then(snap=>{
     if(window._progEdit!==ed)return;
     const data=snap.exists?snap.data():null;
+    ed.creadoTs=data&&!data.movidoA?(data.creadoTs||data.ts||null):null;
     let recuperado=false;
     if(draft&&(!data||(draft.ts||0)>(data.ts||0))){usarBorrador();recuperado=true;}
     else{
@@ -2670,9 +2672,13 @@ function progMarkDirty(){
   clearTimeout(ed.timer);
   ed.timer=setTimeout(()=>progAutoSave(ed),PROG_AUTOSAVE_MS);
 }
-function progWrite(pid,sub,mon,dias){
+function progWrite(pid,sub,mon,dias,creadoTs){
   // Sin caché offline, set() queda esperando hasta que vuelva la red: se limita la espera a 12 s
-  const w=colProg(pid,sub).doc(mon).set({semana:mon,dias,lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid});
+  // creadoTs (2026-11-18): fecha en que se creó la programación. ts cambia con cada autoguardado y no sirve
+  // para saber si se programó el martes para la semana siguiente (progPrevParaEstaSemana).
+  const doc={semana:mon,dias,lv:LABOR_V,ts:Date.now(),creadoPor:currentUser.uid};
+  if(creadoTs)doc.creadoTs=creadoTs;
+  const w=colProg(pid,sub).doc(mon).set(doc);
   const t=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000));
   return Promise.race([w,t]);
 }
@@ -2686,7 +2692,8 @@ async function progAutoSave(ed){
   progSetStatus('⏳ Guardando…');
   let ok=false;
   try{
-    await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,JSON.parse(JSON.stringify(ed.dias)));
+    if(ed.creadoTs===null)ed.creadoTs=Date.now();
+    await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,JSON.parse(JSON.stringify(ed.dias)),ed.creadoTs);
     ed.savedRev=rev;ok=true;
     if(ed.rev===rev){ed.dirty=false;progDraftDel(ed.predioId,ed.subjefe,ed.mondayIso);progSetStatus('✓ Guardado '+progHora(),'var(--green)');}
   }catch(e){
@@ -2710,7 +2717,8 @@ async function saveProgModal(){
   clearTimeout(ed.timer);ed.timer=null;
   loading(true,'Guardando programación…');
   try{
-    await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,JSON.parse(JSON.stringify(ed.dias)));
+    if(ed.creadoTs===null)ed.creadoTs=Date.now();
+    await progWrite(ed.predioId,ed.subjefe,ed.mondayIso,JSON.parse(JSON.stringify(ed.dias)),ed.creadoTs);
     ed.savedRev=ed.rev;ed.dirty=false;
     progDraftDel(ed.predioId,ed.subjefe,ed.mondayIso);
     closeModal();renderProg();toast('✅ Programación guardada');
@@ -2739,7 +2747,7 @@ async function progSyncDrafts(){
       try{
         const snap=await colProg(d.predioId,d.subjefe).doc(d.mondayIso).get();
         const srv=snap.exists?snap.data():null;
-        if(!srv||(d.ts||0)>(srv.ts||0)){await progWrite(d.predioId,d.subjefe,d.mondayIso,d.dias);n++;}
+        if(!srv||(d.ts||0)>(srv.ts||0)){await progWrite(d.predioId,d.subjefe,d.mondayIso,d.dias,srv&&!srv.movidoA?(srv.creadoTs||srv.ts||null):(d.ts||Date.now()));n++;}
         localStorage.removeItem(k);
       }catch(e){}
     }
